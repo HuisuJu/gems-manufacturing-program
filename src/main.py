@@ -6,5 +6,3 @@ if __name__ == '__main__':
     window = Window([(ProvisioningFrame, 'Provisioning'), 
                      (SettingFrame, 'Setting')])
     window.mainloop()
-
-    

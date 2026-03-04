@@ -1,3 +1,4 @@
+from logger import Logger, LogLevel
 import serial
 import serial.tools.list_ports
 import serial.threaded
@@ -16,9 +17,11 @@ class SerialConnection(serial.threaded.Packetizer):
     def connection_made(self, transport):
         super().connection_made(transport)
         self.event.send(self, event='connected')
+        Logger.write(LogLevel.PROGRESS, "Serial port is connected!!")
 
     def connection_lost(self, exc):
         self.event.send(self, event='disconnected')
+        Logger.write(LogLevel.PROGRESS, "Serial port is disconnected!!")
         super().connection_lost(exc)
 
     def handle_packet(self, packet):
