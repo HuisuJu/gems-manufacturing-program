@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from logger import Logger, LogRecord, LogLevel
+from logger.logger import Logger, LogRecord, LogLevel
 
 class LogWidget(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTkFrame, **kwargs):

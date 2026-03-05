@@ -1,14 +1,16 @@
 from typing import Callable
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 from collections import deque
 from datetime import datetime
 import threading
+
 
 class LogLevel(Enum):
     PROGRESS = 1
     WARNING  = 2
     ERROR    = 3
+
 
 @dataclass(slots=True)
 class LogRecord:
@@ -16,29 +18,20 @@ class LogRecord:
     level: LogLevel
     message: str
 
+
 class Logger:
-    records = deque()
+    records: deque[LogRecord] = deque()
     max_records = 10000
 
-    listeners = list()
+    listeners: list[Callable[[LogRecord], None]] = list()
     lock = threading.Lock()
 
     @classmethod
     def configure(cls, max_records: int = 10000) -> None:
-        """
-        Configure logger parameters.
-        """
         cls.max_records = max_records
 
     @classmethod
     def write(cls, level: LogLevel, message: str) -> None:
-        """
-        Main logging API.
-
-        Example
-        -------
-        Logger.write(LogLevel.PROGRESS, "Provisioning started")
-        """
         record = LogRecord(
             timestamp=datetime.now(),
             level=level,
@@ -63,9 +56,6 @@ class Logger:
         start_time: datetime,
         finish_time: datetime
     ) -> list[LogRecord]:
-        """
-        Retrieve current log records with optional filtering.
-        """
         with cls.lock:
             records = list(cls.records)
 
@@ -85,17 +75,11 @@ class Logger:
 
     @classmethod
     def clear(cls) -> None:
-        """
-        Clear all stored logs.
-        """
         with cls.lock:
             cls.records.clear()
 
     @classmethod
     def subscribe(cls, listener: Callable[[LogRecord], None]) -> None:
-        """
-        Register log listener.
-        """
         with cls.lock:
             cls.listeners.append(listener)
 

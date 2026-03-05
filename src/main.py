@@ -1,8 +1,6 @@
-from gui.provisioning_frame import ProvisioningFrame
-from gui.setting_frame import SettingFrame
-from gui.window import Window
+from gui import Window, ProvisioningPage, SettinPage
 
 if __name__ == '__main__':
-    window = Window([(ProvisioningFrame, 'Provisioning'), 
-                     (SettingFrame, 'Setting')])
+    window = Window([(ProvisioningPage, 'Provisioning'), 
+                     (SettinPage, 'Setting')])
     window.mainloop()
