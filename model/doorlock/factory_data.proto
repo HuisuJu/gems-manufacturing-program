@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package factory;
+
+message FactoryData {
+
+  // -----------------------------
+  // System (Non-Matter)
+  // -----------------------------
+  message System {
+    string serial_number       = 1;
+    string manufacturing_date  = 2;
+  }
+
+  // -----------------------------
+  // Matter
+  // -----------------------------
+  message Matter {
+
+    // Attestation / credentials material
+    message Attestation {
+      bytes dac_cert                   = 1;
+      bytes dac_private_key            = 2;
+      bytes pai_cert                   = 3;
+      bytes certification_declaration  = 4;
+    }
+
+    // Commissioning / onboarding material
+    message Commissioning {
+      uint32 spake2p_passcode          = 1;
+      bytes  spake2p_salt              = 2;
+      uint32 spake2p_iteration_count   = 3;
+      bytes  spake2p_verifier          = 4;
+
+      string onboarding_payload        = 5;
+    }
+
+    Attestation   attestation   = 1;
+    Commissioning commissioning = 2;
+  }
+
+  System system = 1;
+  Matter matter = 2;
+}
