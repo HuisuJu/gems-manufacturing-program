@@ -1,34 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# repo root 기준으로 동작하도록
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 MODEL_DIR="${ROOT_DIR}/model"
-OUT_BASE="${ROOT_DIR}/src/model"
+OUT_MODEL_DIR="${ROOT_DIR}/src/model"
 
-# protoc 존재 여부 확인 (없으면 grpc_tools 사용)
 USE_GRPC_TOOLS=0
 if ! command -v protoc >/dev/null 2>&1; then
   USE_GRPC_TOOLS=1
 fi
 
-mkdir -p "${OUT_BASE}"
+echo "ROOT_DIR      = ${ROOT_DIR}"
+echo "MODEL_DIR     = ${MODEL_DIR}"
+echo "OUT_MODEL_DIR = ${OUT_MODEL_DIR}"
+echo "COMPILER      = $([ "${USE_GRPC_TOOLS}" -eq 1 ] && echo 'python -m grpc_tools.protoc' || echo 'protoc')"
 
-# src/model 및 각 모델 폴더를 패키지로 만들고 싶으면 __init__.py 생성(선택)
-touch "${OUT_BASE}/__init__.py"
+mkdir -p "${OUT_MODEL_DIR}"
 
 shopt -s nullglob
 for proto in "${MODEL_DIR}"/*/factory_data.proto; do
   model_name="$(basename "$(dirname "${proto}")")"
-  out_dir="${OUT_BASE}/${model_name}"
+  out_dir="${OUT_MODEL_DIR}/${model_name}"
+
   mkdir -p "${out_dir}"
-  touch "${out_dir}/__init__.py"
 
-  echo "==> [${model_name}] ${proto} -> ${out_dir}"
-
+  echo "==> [${model_name}] ${proto}"
   if [ "${USE_GRPC_TOOLS}" -eq 1 ]; then
-    # grpcio-tools 필요: pip install grpcio-tools
     python -m grpc_tools.protoc \
       -I "${MODEL_DIR}/${model_name}" \
       --python_out="${out_dir}" \
