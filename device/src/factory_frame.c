@@ -19,6 +19,75 @@ static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
     return crc;
 }
 
+factory_frame_error_code_t factory_frame_control_encode(factory_frame_t *frame, bool is_ack, uint8_t sequence)
+{
+    if (!frame) {
+        return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+
+    factory_control_frame_t *ctrl_frame = (factory_control_frame_t *)frame;
+    ctrl_frame->super.magic = FACTORY_FRAME_MAGIC;
+    ctrl_frame->super.type = is_ack ? FACTORY_FRAME_TYPE_ACK : FACTORY_FRAME_TYPE_NACK;
+    ctrl_frame->super.size = sizeof(ctrl_frame->sequence);
+    ctrl_frame->sequence = sequence;
+    ctrl_frame->super.crc16 = crc16_ccitt(&ctrl_frame->sequence, sizeof(ctrl_frame->sequence));
+
+    return FACTORY_FRAME_ERROR_NONE;
+}
+
+factory_frame_error_code_t factory_frame_control_decode(const factory_frame_t *frame, bool *is_ack, uint8_t *sequence)
+{
+    if (!frame || !is_ack || !sequence) {
+        return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+    if (frame->magic != FACTORY_FRAME_MAGIC) {
+        return FACTORY_FRAME_ERROR_INVALID_MAGIC;
+    }
+    if (frame->type != FACTORY_FRAME_TYPE_ACK && frame->type != FACTORY_FRAME_TYPE_NACK) {
+        return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+
+    const factory_control_frame_t *ctrl_frame = (const factory_control_frame_t *)frame;
+    if (frame->size != sizeof(ctrl_frame->sequence)) {
+        return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+
+    uint16_t calculated_crc = crc16_ccitt(&ctrl_frame->sequence, sizeof(ctrl_frame->sequence));
+    if (calculated_crc != frame->crc16) {
+        return FACTORY_FRAME_ERROR_CRC_MISMATCH;
+    }
+
+    *is_ack = (frame->type == FACTORY_FRAME_TYPE_ACK);
+    *sequence = ctrl_frame->sequence;
+
+    return FACTORY_FRAME_ERROR_NONE;
+}
+
+factory_frame_error_code_t factory_frame_get_sequence(const factory_frame_t *frame, uint8_t *sequence)
+{
+    if (!frame || !sequence) {
+        return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+
+    switch ((factory_frame_type_t)frame->type) {
+        case FACTORY_FRAME_TYPE_SINGLE:
+            *sequence = 0xFFu;
+            return FACTORY_FRAME_ERROR_NONE;
+        case FACTORY_FRAME_TYPE_FIRST:
+            *sequence = ((const factory_first_frame_t *)frame)->sequence;
+            return FACTORY_FRAME_ERROR_NONE;
+        case FACTORY_FRAME_TYPE_CONSECUTIVE:
+            *sequence = ((const factory_consecutive_frame_t *)frame)->sequence;
+            return FACTORY_FRAME_ERROR_NONE;
+        case FACTORY_FRAME_TYPE_ACK:
+        case FACTORY_FRAME_TYPE_NACK:
+            *sequence = ((const factory_control_frame_t *)frame)->sequence;
+            return FACTORY_FRAME_ERROR_NONE;
+        default:
+            return FACTORY_FRAME_ERROR_INVALID_ARGUMENT;
+    }
+}
+
 factory_frame_error_code_t factory_frame_assembler_init(
     factory_frame_assembler_context_t *ctx)
 {
@@ -66,6 +135,7 @@ factory_frame_error_code_t factory_frame_assembler_process(
             factory_single_frame_t *single_frame = (factory_single_frame_t *)frame;
             memcpy(ctx->packet, single_frame->data, frame->size);
             ctx->packet_size = frame->size;
+            ctx->sequence = 0xFFu;
             ctx->has_finished = true;
 
             break;
@@ -215,15 +285,15 @@ factory_frame_error_code_t factory_frame_fragmenter_process(
     return FACTORY_FRAME_ERROR_NONE;
 }
 
-int factory_base_frame_reset(factory_base_frame_t *base_frame)
+int factory_frame_init(factory_frame_t *frame)
 {
-    if (!base_frame) {
+    if (!frame) {
         return -1;
     }
-    base_frame->super.magic = FACTORY_FRAME_MAGIC;
-    base_frame->super.type = 0;
-    base_frame->super.size = 0;
-    base_frame->super.crc16 = 0;
+    frame->magic = FACTORY_FRAME_MAGIC;
+    frame->type = 0;
+    frame->size = 0;
+    frame->crc16 = 0;
     // Note: data array is not cleared as its size is determined at allocation time
 
     return 0;

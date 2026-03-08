@@ -23,16 +23,14 @@ static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 #define PACKET_BUFFER_SIZE 1024
 static factory_frame_assembler_context_t assembler_ctx = FACTORY_FRAME_ASSEMBLER_INIT(PACKET_BUFFER_SIZE);
 static factory_frame_fragmenter_context_t fragmenter_ctx = FACTORY_FRAME_FRAGMENTER_INIT(PACKET_BUFFER_SIZE);
-
-static factory_base_frame_t base_frame = FACTORY_BASE_FRAME_INIT;
-static factory_frame_t *frame = (factory_frame_t *)&base_frame;
+FACTORY_FRAME_DEFINE(frame);
 
 void setUp(void)
 {
     // Reset contexts before each test
     factory_frame_assembler_init(&assembler_ctx);
     factory_frame_fragmenter_init(&fragmenter_ctx, PACKET_BUFFER_SIZE);
-    factory_base_frame_reset(&base_frame);
+    factory_frame_init(frame);
 }
 
 void test_factory_frame_assembler_init(void)
@@ -90,7 +88,7 @@ void test_factory_frame_assembler_process_single_frame(void)
     const char *test_data = "Hello, Factory Frame!";
     size_t data_len = strlen(test_data) + 1; // Include null terminator
 
-    factory_single_frame_t *single_frame = (factory_single_frame_t *)&base_frame;
+    factory_single_frame_t *single_frame = (factory_single_frame_t *)&framebase;
     
     single_frame->super.magic = FACTORY_FRAME_MAGIC;
     single_frame->super.type = FACTORY_FRAME_TYPE_SINGLE;
@@ -182,7 +180,7 @@ void test_factory_frame_fragmenter_process_fragmentation(void)
         frame_count++;
         
         // Reset frame for next iteration
-        factory_base_frame_reset(&base_frame);
+        factory_frame_init(frame);
     }
     
     // Verify reassembly
