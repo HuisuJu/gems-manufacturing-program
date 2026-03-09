@@ -1,9 +1,9 @@
 import customtkinter as ctk
 
-from .path_finder_widget import PathFinderWidget
+from .widget.path_finder_widget import PathFinderWidget
 
 
-class SettingPage(ctk.CTkFrame):
+class SettingFrame(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
 
@@ -18,7 +18,3 @@ class SettingPage(ctk.CTkFrame):
             pady=20,
             sticky="nsew",
         )
-
-
-# Backward compatibility
-SettinPage = SettingPage

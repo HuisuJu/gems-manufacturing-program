@@ -24,7 +24,7 @@ class LogSettingWidget(ctk.CTkFrame):
         log_box_widget: LogBoxWidget,
         **kwargs,
     ):
-        super().__init__(parent, **kwargs)
+        super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._log_box_widget = log_box_widget
         self._auto_clear_on_finish_var = ctk.BooleanVar(value=False)

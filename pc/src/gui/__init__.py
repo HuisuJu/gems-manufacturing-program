@@ -1,14 +1,21 @@
-"""
-Top-level GUI package for the GEMS Factory Provisioning Tool.
-"""
+from importlib import import_module
 
-from .window import Window
-from .provisioning import ProvisioningPage
-from .setting.frame import SettingPage, SettinPage
+__all__ = ['Window', 'ProvisioningFrame', 'SettingFrame']
 
-__all__ = [
-    "Window",
-    "ProvisioningPage",
-    "SettingPage",
-    "SettinPage",
-]
+_EXPORT_MAP = {
+    'Window': 'gui.window',
+    'ProvisioningFrame': 'gui.provisioning_frame',
+    'SettingFrame': 'gui.setting_frame',
+}
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MAP.get(name)
+    if module_name is None:
+        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
+    module = import_module(module_name)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+

@@ -13,13 +13,13 @@ from provision import (
 )
 from emulator.dispatcher import EmulatorDispatcher
 
-from .serial_widget import SerialWidget
-from .log_box_widget import LogBoxWidget
-from .log_setting_widget import LogSettingWidget
-from .control_widget import ProvisioningControlWidget
+from .widget.control_widget import ProvisioningControlWidget
+from .widget.log_box_widget import LogBoxWidget
+from .widget.log_setting_widget import LogSettingWidget
+from .widget.serial_widget import SerialWidget
 
 
-class ProvisioningPage(ctk.CTkFrame):
+class ProvisioningFrame(ctk.CTkFrame):
     NUM_COLUMNS = 2
     NUM_ROWS = 2
 

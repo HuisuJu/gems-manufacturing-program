@@ -1,4 +1,4 @@
-from gui import Window, ProvisioningPage, SettingPage
+from gui import Window, ProvisioningFrame, SettingFrame
 
 
 def main() -> None:
@@ -7,8 +7,8 @@ def main() -> None:
     """
     window = Window(
         [
-            (ProvisioningPage, "Provisioning"),
-            (SettingPage, "Setting"),
+            (ProvisioningFrame, "Provisioning"),
+            (SettingFrame, "Setting"),
         ]
     )
 
