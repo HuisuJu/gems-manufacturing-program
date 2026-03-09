@@ -4,11 +4,21 @@
 *.error_message max_size:128
 
 # Array size limits
-ReadRequest.fields max_count:32
-ReadResponse.field_data max_count:32
-WriteRequest.field_data max_count:32
-WriteResponse.written_fields max_count:32
-WriteResponse.failed_fields max_count:32
+ReadRequest.system_fields max_count:16
+ReadRequest.matter_fields max_count:16
+ReadRequest.device_fields max_count:32
+ReadResponse.system_data max_count:16
+ReadResponse.matter_data max_count:16
+ReadResponse.device_data max_count:32
+WriteRequest.system_data max_count:16
+WriteRequest.matter_data max_count:16
+WriteRequest.device_data max_count:32
+WriteResponse.written_system_fields max_count:16
+WriteResponse.failed_system_fields max_count:16
+WriteResponse.written_matter_fields max_count:16
+WriteResponse.failed_matter_fields max_count:16
+WriteResponse.written_device_fields max_count:32
+WriteResponse.failed_device_fields max_count:32
 
-# FieldDataEntry data size limit (adjust based on largest certificate/key)
-FieldDataEntry.data max_size:1024
+# DeviceFieldDataEntry data size limit
+DeviceFieldDataEntry.data max_size:1024

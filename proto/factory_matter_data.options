@@ -2,6 +2,7 @@
 
 # Matter certificate and key size limits (based on Matter spec)
 MatterAttestation.dac_cert max_size:600
+MatterAttestation.dac_public_key max_size:128
 MatterAttestation.dac_private_key max_size:128
 MatterAttestation.pai_cert max_size:600
 MatterAttestation.certification_declaration max_size:512
@@ -10,3 +11,6 @@ MatterAttestation.certification_declaration max_size:512
 MatterCommissioning.spake2p_salt max_size:32
 MatterCommissioning.spake2p_verifier max_size:97
 MatterCommissioning.onboarding_payload max_size:256
+
+# Matter field data entry
+MatterFieldDataEntry.data max_size:1024

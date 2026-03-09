@@ -5,3 +5,6 @@ SystemData.serial_number max_size:32
 SystemData.manufacturing_date max_size:16
 SystemData.hardware_version max_size:16
 SystemData.firmware_version max_size:16
+
+# System field data entry
+SystemFieldDataEntry.data max_size:64

@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package factory;
 
+import "factory_system_data.proto";
+import "factory_matter_data.proto";
+
 // -----------------------------------------------------------------------------
 // Command types
 // -----------------------------------------------------------------------------
@@ -26,45 +29,10 @@ enum StatusCode {
 }
 
 // -----------------------------------------------------------------------------
-// Field types for READ operations
+// Device-specific field data entry (model-owned field namespace)
 // -----------------------------------------------------------------------------
-enum FactoryFieldType {
-  FACTORY_FIELD_UNSPECIFIED = 0;
-
-  // System fields (1-99) - model-specific
-  FACTORY_FIELD_SYSTEM_SERIAL_NUMBER      = 1;
-  FACTORY_FIELD_SYSTEM_MANUFACTURING_DATE = 2;
-  FACTORY_FIELD_SYSTEM_HARDWARE_VERSION   = 3;
-  FACTORY_FIELD_SYSTEM_FIRMWARE_VERSION   = 4;
-
-  // Matter attestation fields (100-199) - common across all Matter devices
-  FACTORY_FIELD_MATTER_ATTESTATION_DAC_CERT                  = 100;
-  FACTORY_FIELD_MATTER_ATTESTATION_DAC_PRIVATE_KEY           = 101;
-  FACTORY_FIELD_MATTER_ATTESTATION_PAI_CERT                  = 102;
-  FACTORY_FIELD_MATTER_ATTESTATION_CERTIFICATION_DECLARATION = 103;
-
-  // Matter commissioning fields (200-299) - common across all Matter devices
-  FACTORY_FIELD_MATTER_COMMISSIONING_SPAKE2P_PASSCODE        = 200;
-  FACTORY_FIELD_MATTER_COMMISSIONING_SPAKE2P_SALT            = 201;
-  FACTORY_FIELD_MATTER_COMMISSIONING_SPAKE2P_ITERATION_COUNT = 202;
-  FACTORY_FIELD_MATTER_COMMISSIONING_SPAKE2P_VERIFIER        = 203;
-  FACTORY_FIELD_MATTER_COMMISSIONING_ONBOARDING_PAYLOAD      = 204;
-
-  // Device-specific fields start from 1000
-  // Doorlock: 1000-1999
-  FACTORY_FIELD_DOORLOCK_MOTOR_CALIBRATION = 1000;
-  FACTORY_FIELD_DOORLOCK_NFC_TAG_UID       = 1001;
-
-  // Thermostat: 2000-2999
-  FACTORY_FIELD_THERMOSTAT_TEMPERATURE_CALIBRATION = 2000;
-  FACTORY_FIELD_THERMOSTAT_HUMIDITY_CALIBRATION    = 2001;
-}
-
-// -----------------------------------------------------------------------------
-// Field data entry (nanopb-friendly: no map, use repeated instead)
-// -----------------------------------------------------------------------------
-message FieldDataEntry {
-  FactoryFieldType field_type = 1;
+message DeviceFieldDataEntry {
+  uint32 field_id = 1;
   bytes data = 2;
 }
 
@@ -72,8 +40,14 @@ message FieldDataEntry {
 // READ command: PC requests specific fields, device responds with data
 // -----------------------------------------------------------------------------
 message ReadRequest {
-  // List of fields to read from the device
-  repeated FactoryFieldType fields = 1;
+  // List of system fields to read
+  repeated SystemFieldType system_fields = 1;
+
+  // List of Matter fields to read
+  repeated MatterFieldType matter_fields = 2;
+
+  // List of device-specific field IDs to read
+  repeated uint32 device_fields = 3;
 }
 
 message ReadResponse {
@@ -83,18 +57,28 @@ message ReadResponse {
   // Optional error message
   string error_message = 2;
 
-  // Field values (only requested fields are populated)
-  // nanopb-friendly: repeated instead of map
-  repeated FieldDataEntry field_data = 3;
+  // System field values (only requested fields are populated)
+  repeated SystemFieldDataEntry system_data = 3;
+
+  // Matter field values (only requested fields are populated)
+  repeated MatterFieldDataEntry matter_data = 4;
+
+  // Device-specific field values
+  repeated DeviceFieldDataEntry device_data = 5;
 }
 
 // -----------------------------------------------------------------------------
 // WRITE command: PC sends data, device writes and returns success/failure
 // -----------------------------------------------------------------------------
 message WriteRequest {
-  // Field values to write
-  // nanopb-friendly: repeated instead of map
-  repeated FieldDataEntry field_data = 1;
+  // System field values to write
+  repeated SystemFieldDataEntry system_data = 1;
+
+  // Matter field values to write
+  repeated MatterFieldDataEntry matter_data = 2;
+
+  // Device-specific field values to write
+  repeated DeviceFieldDataEntry device_data = 3;
 }
 
 message WriteResponse {
@@ -104,11 +88,23 @@ message WriteResponse {
   // Optional error message
   string error_message = 2;
 
-  // List of successfully written fields
-  repeated FactoryFieldType written_fields = 3;
+  // Successfully written system fields
+  repeated SystemFieldType written_system_fields = 3;
 
-  // List of fields that failed to write
-  repeated FactoryFieldType failed_fields = 4;
+  // Failed system fields
+  repeated SystemFieldType failed_system_fields = 4;
+
+  // Successfully written Matter fields
+  repeated MatterFieldType written_matter_fields = 5;
+
+  // Failed Matter fields
+  repeated MatterFieldType failed_matter_fields = 6;
+
+  // Successfully written device-specific field IDs
+  repeated uint32 written_device_fields = 7;
+
+  // Failed device-specific field IDs
+  repeated uint32 failed_device_fields = 8;
 }
 
 // -----------------------------------------------------------------------------

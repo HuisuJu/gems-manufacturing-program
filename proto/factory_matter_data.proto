@@ -3,6 +3,34 @@ syntax = "proto3";
 package factory;
 
 // -----------------------------------------------------------------------------
+// Matter field types (READ/WRITE target fields)
+// -----------------------------------------------------------------------------
+enum MatterFieldType {
+  MATTER_FIELD_UNSPECIFIED = 0;
+
+  // Matter attestation fields
+  MATTER_FIELD_ATTESTATION_DAC_CERT = 100;
+  MATTER_FIELD_ATTESTATION_DAC_PRIVATE_KEY = 101;
+  MATTER_FIELD_ATTESTATION_PAI_CERT = 102;
+  MATTER_FIELD_ATTESTATION_CERTIFICATION_DECLARATION = 103;
+
+  // Matter commissioning fields
+  MATTER_FIELD_COMMISSIONING_SPAKE2P_PASSCODE = 200;
+  MATTER_FIELD_COMMISSIONING_SPAKE2P_SALT = 201;
+  MATTER_FIELD_COMMISSIONING_SPAKE2P_ITERATION_COUNT = 202;
+  MATTER_FIELD_COMMISSIONING_SPAKE2P_VERIFIER = 203;
+  MATTER_FIELD_COMMISSIONING_ONBOARDING_PAYLOAD = 204;
+}
+
+// -----------------------------------------------------------------------------
+// Matter field data entry
+// -----------------------------------------------------------------------------
+message MatterFieldDataEntry {
+  MatterFieldType field_type = 1;
+  bytes data = 2;
+}
+
+// -----------------------------------------------------------------------------
 // Matter-specific factory data (common across all Matter devices)
 // -----------------------------------------------------------------------------
 
@@ -14,7 +42,7 @@ message MatterAttestation {
   optional bytes dac_cert = 1;
 
   // Device Attestation Certificate Public Key
-  optional bytes dac_public_key = 2
+  optional bytes dac_public_key = 2;
 
   // Device Attestation Certificate Private Key
   optional bytes dac_private_key = 3;
