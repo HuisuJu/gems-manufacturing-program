@@ -1,6 +1,8 @@
 import customtkinter as ctk
 import webbrowser
+from pathlib import Path
 
+from factory_data import FactoryDataPoolManager, FactoryDataPoolManagerError
 from stream import SerialManager
 from session import Session
 from logger import Logger, LogLevel
@@ -30,6 +32,11 @@ class ProvisioningFrame(ctk.CTkFrame):
     EMULATOR_PORTS = [
         "doorlock_emulator",
         "thermostat_emulator",
+    ]
+
+    EMULATOR_DEFAULT_POOL_DIRS = [
+        "doorlock",
+        "thermostat",
     ]
 
     def __init__(self, master, **kwargs):
@@ -250,6 +257,7 @@ class ProvisioningFrame(ctk.CTkFrame):
         target_mode = str(target_mode).strip().lower()
 
         if target_mode == self.TARGET_EMULATOR:
+            self._ensure_emulator_factory_data_pool()
             dispatcher = EmulatorDispatcher(
                 initial_ready=True,
                 dispatch_delay_sec=1.0,
@@ -297,6 +305,69 @@ class ProvisioningFrame(ctk.CTkFrame):
             LogLevel.WARNING,
             f"[PROVISION] Unknown target mode: {target_mode}",
         )
+
+    def _ensure_emulator_factory_data_pool(self) -> None:
+        pool_manager = FactoryDataPoolManager()
+
+        try:
+            report = pool_manager.get_report()
+        except Exception as exc:
+            Logger.write(
+                LogLevel.WARNING,
+                f"[PROVISION] Failed to read pool report ({type(exc).__name__}: {exc})",
+            )
+            return
+
+        if report.is_ready:
+            return
+
+        fallback_path = self._find_emulator_default_pool_path()
+        if fallback_path is None:
+            Logger.write(
+                LogLevel.WARNING,
+                "[PROVISION] Emulator default factory-data path is not available.",
+            )
+            return
+
+        try:
+            pool_manager.set_pool_path(fallback_path)
+            Logger.write(
+                LogLevel.PROGRESS,
+                f"[PROVISION] Emulator pool path set to: {fallback_path}",
+            )
+        except FactoryDataPoolManagerError as exc:
+            Logger.write(
+                LogLevel.WARNING,
+                f"[PROVISION] Failed to set emulator pool path ({type(exc).__name__}: {exc})",
+            )
+
+    def _find_emulator_default_pool_path(self) -> Path | None:
+        repo_root = Path(__file__).resolve().parents[3]
+        factory_data_root = repo_root / "example" / "factory-data"
+
+        if not factory_data_root.is_dir():
+            return None
+
+        for directory_name in self.EMULATOR_DEFAULT_POOL_DIRS:
+            candidate = factory_data_root / directory_name
+            if not candidate.is_dir():
+                continue
+
+            has_json = any(
+                file_path.is_file() and file_path.suffix.lower() == ".json"
+                for file_path in candidate.iterdir()
+            )
+            if has_json:
+                return candidate
+
+        has_json_in_root = any(
+            file_path.is_file() and file_path.suffix.lower() == ".json"
+            for file_path in factory_data_root.iterdir()
+        )
+        if has_json_in_root:
+            return factory_data_root
+
+        return None
 
     def _on_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
         self.after(0, lambda: self._apply_provision_manager_event(event))

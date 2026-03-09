@@ -1,27 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Doorlock Factory Data",
+  "title": "Base Matter Factory Data",
   "type": "object",
-
-  "required": [
-    "serial_number",
-    "manufactured_date",
-
-    "dac_cert",
-    "dac_private_key",
-    "pai_cert",
-    "certification_declaration",
-
-    "spake2p_passcode",
-    "spake2p_salt",
-    "spake2p_iteration_count",
-    "spake2p_verifier",
-
-    "onboarding_payload"
-  ],
-
   "properties": {
-
     "serial_number": {
       "type": "string",
       "description": "Unique device serial number"
@@ -29,13 +10,38 @@
 
     "manufactured_date": {
       "type": "string",
-      "description": "Manufacturing date (YYYY-MM-DD)",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      "description": "Manufacturing date in YYYYMMDD format",
+      "pattern": "^\\d{8}$"
+    },
+
+    "vendor_id": {
+      "type": "integer",
+      "description": "Matter Vendor ID"
+    },
+
+    "product_id": {
+      "type": "integer",
+      "description": "Matter Product ID"
+    },
+
+    "custom_flow": {
+      "type": "integer",
+      "description": "Matter commissioning flow"
+    },
+
+    "discovery_capabilities": {
+      "type": "integer",
+      "description": "Matter discovery capability bitmask used for onboarding payload generation"
     },
 
     "dac_cert": {
       "type": "string",
       "description": "Device Attestation Certificate"
+    },
+
+    "dac_public_key": {
+      "type": "string",
+      "description": "Device Attestation Public Key"
     },
 
     "dac_private_key": {
@@ -62,26 +68,23 @@
 
     "spake2p_salt": {
       "type": "string",
-      "description": "SPAKE2+ salt"
+      "description": "SPAKE2+ salt encoded as Base64"
     },
 
     "spake2p_iteration_count": {
       "type": "integer",
-      "minimum": 1,
-      "description": "SPAKE2+ iteration count"
+      "description": "Matter SPAKE2+ iteration count"
     },
 
     "spake2p_verifier": {
       "type": "string",
-      "description": "SPAKE2+ verifier"
+      "description": "SPAKE2+ verifier encoded as Base64"
     },
 
     "onboarding_payload": {
       "type": "string",
-      "description": "Matter onboarding payload"
+      "description": "Matter onboarding QR payload string beginning with MT:"
     }
-
   },
-
   "additionalProperties": false
 }

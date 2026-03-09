@@ -1,107 +1,42 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Thermostat Factory Data",
-  "type": "object",
-
   "required": [
     "serial_number",
-
-    "vendor_id",
-    "product_id",
-    "custom_flow",
-    "discovery_capabilities",
-
     "dac_cert",
+    "dac_public_key",
     "dac_private_key",
     "pai_cert",
     "certification_declaration",
-
     "spake2p_passcode",
     "spake2p_salt",
     "spake2p_iteration_count",
     "spake2p_verifier",
-
     "onboarding_payload"
   ],
-
   "properties": {
-    "serial_number": {
-      "type": "string",
-      "description": "Unique device serial number"
-    },
-
     "vendor_id": {
-      "type": "integer",
       "const": 4142,
       "description": "Matter Vendor ID (0x102E)"
     },
 
     "product_id": {
-      "type": "integer",
-      "const": 8897,
+      "const": 8864,
       "description": "Temporary Matter Product ID for Thermostat (0x22C1)"
     },
 
     "custom_flow": {
-      "type": "integer",
       "const": 0,
       "description": "Matter commissioning flow. Standard flow is 0."
     },
 
     "discovery_capabilities": {
-      "type": "integer",
       "const": 2,
       "description": "Matter discovery capability bitmask used for onboarding payload generation. BLE only is 2."
     },
 
-    "dac_cert": {
-      "type": "string",
-      "description": "Device Attestation Certificate"
-    },
-
-    "dac_private_key": {
-      "type": "string",
-      "description": "Device Attestation Private Key"
-    },
-
-    "pai_cert": {
-      "type": "string",
-      "description": "Product Attestation Intermediate Certificate"
-    },
-
-    "certification_declaration": {
-      "type": "string",
-      "description": "Matter Certification Declaration"
-    },
-
-    "spake2p_passcode": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 99999999,
-      "description": "Matter SPAKE2+ passcode"
-    },
-
-    "spake2p_salt": {
-      "type": "string",
-      "description": "SPAKE2+ salt encoded as Base64"
-    },
-
     "spake2p_iteration_count": {
-      "type": "integer",
       "const": 1000,
       "description": "Matter SPAKE2+ iteration count"
-    },
-
-    "spake2p_verifier": {
-      "type": "string",
-      "description": "SPAKE2+ verifier encoded as Base64"
-    },
-
-    "onboarding_payload": {
-      "type": "string",
-      "description": "Matter onboarding QR payload string beginning with MT:"
     }
-  },
-
-  "additionalProperties": false
+  }
 }

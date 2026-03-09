@@ -1,44 +1,31 @@
-"""
-Factory data package public API.
-
-This package provides:
-    - FactoryDataProvider for provisioning-time payload retrieval/reporting
-    - FactoryDataPoolManager for pool path management and pool status handling
-"""
-
 from .provider import (
     FactoryDataProvider,
-    FactoryDataGetResult,
+    FactoryDataProviderConflictError,
+    FactoryDataProviderConfigurationError,
     FactoryDataProviderError,
     FactoryDataProviderInProgressError,
-    FactoryDataProviderHandleError,
+    FactoryDataProviderReportError,
 )
-
-from .pool_manager import (
-    FactoryDataPoolManager,
-    FactoryDataPoolManagerError,
-    FactoryDataPoolInactiveError,
-    FactoryDataPoolPathError,
-    FactoryDataPoolLeaseError,
-    FactoryDataPoolEmptyError,
-    FactoryDataPoolReport,
-    FactoryDataPoolLease,
+from .retriever import (
+    DeviceIdentityRetriever,
+    ManufacturingDataRetriever,
+    MatterAttestationDataRetriever,
+    MatterOnboardingDataRetriever,
+    Retriever,
+    RetrieverError,
 )
 
 __all__ = [
-    # provider
     "FactoryDataProvider",
-    "FactoryDataGetResult",
     "FactoryDataProviderError",
+    "FactoryDataProviderConfigurationError",
     "FactoryDataProviderInProgressError",
-    "FactoryDataProviderHandleError",
-    # pool manager
-    "FactoryDataPoolManager",
-    "FactoryDataPoolManagerError",
-    "FactoryDataPoolInactiveError",
-    "FactoryDataPoolPathError",
-    "FactoryDataPoolLeaseError",
-    "FactoryDataPoolEmptyError",
-    "FactoryDataPoolReport",
-    "FactoryDataPoolLease",
+    "FactoryDataProviderReportError",
+    "FactoryDataProviderConflictError",
+    "Retriever",
+    "RetrieverError",
+    "DeviceIdentityRetriever",
+    "ManufacturingDataRetriever",
+    "MatterAttestationDataRetriever",
+    "MatterOnboardingDataRetriever",
 ]

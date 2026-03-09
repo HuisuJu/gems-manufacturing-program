@@ -8,23 +8,27 @@ simulates a provisioning delay, and returns a synthetic DispatchResult.
 
 from __future__ import annotations
 
+import json
+
 import time
-from dataclasses import dataclass
+
 from typing import Any, Optional
+
+from logger import Logger, LogLevel
 
 from provision import DispatchResult, ProvisionDispatcher
 
 
-@dataclass(slots=True)
 class _PayloadStats:
     """
     Recursive payload traversal statistics.
     """
 
-    dict_count: int = 0
-    list_count: int = 0
-    scalar_count: int = 0
-    key_count: int = 0
+    def __init__(self) -> None:
+        self.dict_count = 0
+        self.list_count = 0
+        self.scalar_count = 0
+        self.key_count = 0
 
 
 class EmulatorDispatcher(ProvisionDispatcher):
@@ -130,6 +134,12 @@ class EmulatorDispatcher(ProvisionDispatcher):
         if not isinstance(payload, dict):
             raise TypeError("Provision payload must be a dictionary.")
 
+        Logger.write(
+            LogLevel.PROGRESS,
+            "[EMULATOR] Received payload JSON:\n"
+            f"{self._format_payload_for_log(payload)}",
+        )
+
         start_time = time.monotonic()
         stats = _PayloadStats()
         self._consume_value(payload, stats)
@@ -176,6 +186,17 @@ class EmulatorDispatcher(ProvisionDispatcher):
 
         self._last_result = result
         return result
+
+    def _format_payload_for_log(self, payload: dict[str, Any]) -> str:
+        try:
+            return json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        except Exception:
+            return repr(payload)
 
     def close(self) -> None:
         """
