@@ -229,12 +229,9 @@ static int read_frame(factory_frame_t *frame, uint32_t timeout_ms)
         }
     }
 
-    // Write magic to frame header
-    frame->magic = FACTORY_FRAME_MAGIC;
-
-    // Read rest of header (type, size, crc16)
-    uint8_t *header_ptr = ((uint8_t *)frame) + 2;
-    size_t header_remaining = FACTORY_FRAME_HEADER_SIZE - 2;
+    // Read rest of header in wire format: type(1) | size(2, BE) | crc16(2, BE)
+    uint8_t header_rest[FACTORY_FRAME_HEADER_SIZE - 2];
+    size_t header_remaining = sizeof(header_rest);
     size_t total_reads = 0;
     negative_read_count = 0;
 
@@ -243,7 +240,7 @@ static int read_frame(factory_frame_t *frame, uint32_t timeout_ms)
             return -4;
         }
 
-        ssize_t num_reads = factory_platform_uart_read(header_ptr + total_reads, header_remaining - total_reads);
+        ssize_t num_reads = factory_platform_uart_read(header_rest + total_reads, header_remaining - total_reads);
         if (num_reads < 0) {
             negative_read_count++;
             if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
@@ -259,6 +256,12 @@ static int read_frame(factory_frame_t *frame, uint32_t timeout_ms)
             factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
         }
     }
+
+    // Decode header fields from wire format
+    frame->magic = FACTORY_FRAME_MAGIC;
+    frame->type = header_rest[0];
+    frame->size = decode_u16_be(&header_rest[1]);
+    frame->crc16 = decode_u16_be(&header_rest[3]);
 
     // Validate frame size
     if (frame->size > FACTORY_FRAME_MAX_DATA_SIZE) {
@@ -318,8 +321,21 @@ static int write_frame(const factory_frame_t *frame, uint32_t timeout_ms)
         return -1;
     }
 
+    if (frame->size > FACTORY_FRAME_MAX_DATA_SIZE) {
+        return -4;
+    }
+
+    uint8_t raw[FACTORY_FRAME_MAX_SIZE];
+    raw[0] = (uint8_t)((FACTORY_FRAME_MAGIC >> 8) & 0xFFu);
+    raw[1] = (uint8_t)(FACTORY_FRAME_MAGIC & 0xFFu);
+    raw[2] = frame->type;
+    encode_u16_be(&raw[3], frame->size);
+    encode_u16_be(&raw[5], frame->crc16);
+    if (frame->size > 0) {
+        memcpy(&raw[FACTORY_FRAME_HEADER_SIZE], ((const uint8_t *)frame) + FACTORY_FRAME_HEADER_SIZE, frame->size);
+    }
+
     const size_t frame_size = FACTORY_FRAME_HEADER_SIZE + frame->size;
-    const uint8_t *buffer = (const uint8_t *)frame;
     size_t total_written = 0;
     uint32_t negative_write_count = 0;
     const uint32_t start_ms = factory_platform_get_uptime_ms();
@@ -329,7 +345,7 @@ static int write_frame(const factory_frame_t *frame, uint32_t timeout_ms)
             return -2;
         }
 
-        ssize_t num_written = factory_platform_uart_write(buffer + total_written, frame_size - total_written);
+        ssize_t num_written = factory_platform_uart_write(raw + total_written, frame_size - total_written);
         if (num_written < 0) {
             negative_write_count++;
             if (negative_write_count >= FACTORY_UART_MAX_RETRIES) {

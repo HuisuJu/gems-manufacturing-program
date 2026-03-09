@@ -142,7 +142,8 @@ factory_frame_error_code_t factory_frame_assembler_process(
         }
         case FACTORY_FRAME_TYPE_FIRST: {
             factory_first_frame_t *first_frame = (factory_first_frame_t *)frame;
-            if (first_frame->total_size > ctx->packet_capacity) {
+            uint32_t total_size = decode_u32_be((const uint8_t *)&first_frame->total_size);
+            if (total_size > ctx->packet_capacity) {
                 ctx->has_error = true;
                 ctx->has_finished = true;
                 return FACTORY_FRAME_ERROR_BUFFER_OVERFLOW;
@@ -152,7 +153,7 @@ factory_frame_error_code_t factory_frame_assembler_process(
                 ctx->has_finished = true;
                 return FACTORY_FRAME_ERROR_UNEXPECTED_SEQUENCE;
             }
-            ctx->total_size = first_frame->total_size;
+            ctx->total_size = total_size;
             size_t data_size = frame->size - sizeof(uint32_t) - sizeof(uint8_t);
             memcpy(ctx->packet, first_frame->data, data_size);
             ctx->packet_size = data_size;
@@ -249,8 +250,8 @@ factory_frame_error_code_t factory_frame_fragmenter_process(
         frame->magic = FACTORY_FRAME_MAGIC;
         frame->type = FACTORY_FRAME_TYPE_FIRST;
         frame->size = chunk_size + sizeof(uint32_t) + sizeof(uint8_t);
-        
-        first_frame->total_size = ctx->packet_size;
+
+        encode_u32_be((uint8_t *)&first_frame->total_size, (uint32_t)ctx->packet_size);
         first_frame->sequence = ctx->sequence;
         memcpy(first_frame->data, ctx->packet, chunk_size);
         frame->crc16 = crc16_ccitt((uint8_t *)first_frame + FACTORY_FRAME_HEADER_SIZE, frame->size);
