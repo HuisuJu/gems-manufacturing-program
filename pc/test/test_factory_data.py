@@ -32,7 +32,7 @@ C0lB8xhAM4owHQYDVR0OBBYEFJbqM5vrMMswH8GCk9Zku1RZqz+SMA4GA1UdDwEB
 CD6T2xIhp7p7j/qYITBIAFl8cYIEoDvUsAIgMoDzvXZQFuhI6l8s+AM4SlgtKrgw
 wsv3X3lT1L6gfRk=
 -----END CERTIFICATE-----
-""".replace(" ", "").replace("\n\n", "\n")
+"""
 
 # The above certificate text may not always parse if manually edited.
 # A stable test strategy is to generate PEM files from DER-like artifacts already
@@ -44,7 +44,7 @@ MHcCAQEEIPPZ5TNaH1khMvHW9Ebbyu97RXE8jN+oR0kDQi51wNlHoAoGCCqGSM49
 AwEHoUQDQgAErDhhCY1LKdB8YHLZ5hc97cclRXWk69/2cWmq3uoxrzQ7EwvVGQzw
 zzXK7noQPeF8GVOdKXTogvqD1MI8BuzVUg==
 -----END EC PRIVATE KEY-----
-""".replace(" ", "").replace("\n\n", "\n")
+"""
 
 PAI_CERT_PEM = """-----BEGIN CERTIFICATE-----
 MIIB7TCCAZOgAwIBAgIUDPQMAgnbeRCxJBSh7IMVPwoERcgwCgYIKoZIzj0EAwIw
@@ -59,7 +59,7 @@ KN5AJTNeaY0wHQYDVR0OBBYEFP2u7WYFiC0yLG+LYwtJQfMYQDOKMA4GA1UdDwEB
 1qEioCwUkgkV/anOdHmnNyZ/CYlVfyNRUVnpGTJkAiEAvi9IA9jDKQSlEdqHy71l
 IPydEl6c4OSaQW/yYgaCea4=
 -----END CERTIFICATE-----
-""".replace(" ", "").replace("\n\n", "\n")
+"""
 
 
 CD_DER_BYTES = bytes([

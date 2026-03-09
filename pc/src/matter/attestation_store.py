@@ -10,6 +10,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from settings import SettingsItem, settings as app_settings
+
 
 DacStatus = Literal["ready", "consumed", "error"]
 
@@ -22,13 +24,13 @@ class AttestationStoreError(Exception):
 
 class AttestationStoreConfigurationError(AttestationStoreError):
     """
-    Raised when required configuration is missing or invalid.
+    Raised when required configuration is missing.
     """
 
 
 class AttestationStoreValidationError(AttestationStoreError):
     """
-    Raised when an attestation-related file fails validation.
+    Raised when an attestation-related file cannot be loaded or converted.
     """
 
 
@@ -83,15 +85,9 @@ class DacCredentialPoolStore:
     """
     Manage a DAC credential folder and its metadata.json file.
 
-    This class is responsible for:
-    - scanning the DAC folder
-    - maintaining metadata.json
-    - resolving Cert/Key pairs by base name
-    - providing pull()/report(is_success) semantics
-
-    Status transitions:
-    - ready -> consumed when report(True) is called
-    - ready -> error when report(False) is called
+    The DAC folder path is driven by the global settings module.
+    This store subscribes to DAC_POOL_DIR_PATH changes and updates its
+    internal state automatically.
     """
 
     METADATA_FILENAME = "metadata.json"
@@ -109,10 +105,15 @@ class DacCredentialPoolStore:
 
     def __init__(self) -> None:
         """
-        Initialize an empty DAC credential pool store.
+        Initialize the DAC credential pool store and subscribe to settings.
         """
         self._directory: Path | None = None
         self._leased_material: DacCredentialMaterial | None = None
+
+        app_settings.subscribe(SettingsItem.DAC_POOL_DIR_PATH, self._on_setting_changed)
+
+        current_value = app_settings.get(SettingsItem.DAC_POOL_DIR_PATH)
+        self._apply_directory(current_value)
 
     @property
     def directory(self) -> Path | None:
@@ -120,36 +121,6 @@ class DacCredentialPoolStore:
         Return the configured DAC directory.
         """
         return self._directory
-
-    def set_directory(self, directory: str | Path) -> None:
-        """
-        Configure the DAC credential directory.
-
-        The metadata.json file is created if it does not exist, and existing
-        metadata is synchronized with the folder contents.
-
-        Args:
-            directory: DAC credential folder path.
-
-        Raises:
-            AttestationStoreConfigurationError: If the path is invalid.
-        """
-        path = Path(directory).expanduser().resolve()
-
-        if not path.exists():
-            raise AttestationStoreConfigurationError(
-                "The selected DAC folder does not exist."
-            )
-
-        if not path.is_dir():
-            raise AttestationStoreConfigurationError(
-                "The selected DAC path is not a folder."
-            )
-
-        self._directory = path
-        self._leased_material = None
-        self._ensure_metadata_file()
-        self._sync_metadata()
 
     def pull(self) -> DacCredentialMaterial:
         """
@@ -298,6 +269,34 @@ class DacCredentialPoolStore:
         directory = self._require_directory()
         return directory / self.METADATA_FILENAME
 
+    def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
+        """
+        Apply DAC pool directory changes from settings.
+        """
+        if item != SettingsItem.DAC_POOL_DIR_PATH:
+            return
+
+        self._apply_directory(value)
+
+    def _apply_directory(self, value: object | None) -> None:
+        """
+        Apply the DAC directory value received from settings.
+        """
+        if value is None:
+            self._directory = None
+            self._leased_material = None
+            return
+
+        if not isinstance(value, Path):
+            raise AttestationStoreConfigurationError(
+                "The DAC pool directory setting is invalid."
+            )
+
+        self._directory = value
+        self._leased_material = None
+        self._ensure_metadata_file()
+        self._sync_metadata()
+
     def _require_directory(self) -> Path:
         """
         Return the configured DAC directory.
@@ -401,13 +400,6 @@ class DacCredentialPoolStore:
     def _sync_metadata(self) -> None:
         """
         Synchronize metadata.json with the current DAC folder contents.
-
-        Rules:
-        - every detected DAC base name is represented in metadata.json
-        - entries with both cert and key files become ready unless already
-          consumed
-        - entries missing cert or key become error
-        - consumed entries remain consumed
         """
         metadata = self._load_metadata()
         previous_entries = metadata.get("entries", {})
@@ -516,57 +508,20 @@ class PaiCertStore:
     """
     Manage a single PAI certificate file.
 
-    The configured PEM file is converted to DER bytes and cached in memory.
+    The PAI file path is driven by the global settings module. The configured
+    PEM file is converted to DER bytes and cached in memory.
     """
 
     def __init__(self) -> None:
         """
-        Initialize an empty PAI certificate store.
+        Initialize the PAI certificate store and subscribe to settings.
         """
         self._pai_cert_der: bytes | None = None
 
-    def set_file(self, path: str | Path) -> None:
-        """
-        Load a PAI certificate PEM file and cache its DER bytes.
+        app_settings.subscribe(SettingsItem.PAI_FILE_PATH, self._on_setting_changed)
 
-        Args:
-            path: Path to the PAI certificate PEM file.
-
-        Raises:
-            AttestationStoreValidationError: If the file is invalid or cannot
-                be converted.
-        """
-        file_path = Path(path).expanduser().resolve()
-
-        if not file_path.exists():
-            raise AttestationStoreValidationError(
-                "The selected PAI certificate file does not exist."
-            )
-
-        if not file_path.is_file():
-            raise AttestationStoreValidationError(
-                "The selected PAI certificate path is not a file."
-            )
-
-        if file_path.suffix.lower() != ".pem":
-            raise AttestationStoreValidationError(
-                "The selected PAI certificate file must be a .pem file."
-            )
-
-        try:
-            pem_data = file_path.read_bytes()
-        except OSError as exc:
-            raise AttestationStoreValidationError(
-                "Failed to read the selected PAI certificate file."
-            ) from exc
-
-        try:
-            certificate = x509.load_pem_x509_certificate(pem_data)
-            self._pai_cert_der = certificate.public_bytes(serialization.Encoding.DER)
-        except Exception as exc:
-            raise AttestationStoreValidationError(
-                "Failed to convert the selected PAI certificate PEM file."
-            ) from exc
+        current_value = app_settings.get(SettingsItem.PAI_FILE_PATH)
+        self._apply_file(current_value)
 
     def get_der(self) -> bytes:
         """
@@ -582,53 +537,62 @@ class PaiCertStore:
 
         return self._pai_cert_der
 
+    def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
+        """
+        Apply PAI file changes from settings.
+        """
+        if item != SettingsItem.PAI_FILE_PATH:
+            return
+
+        self._apply_file(value)
+
+    def _apply_file(self, value: object | None) -> None:
+        """
+        Load and cache the current PAI PEM file.
+        """
+        if value is None:
+            self._pai_cert_der = None
+            return
+
+        if not isinstance(value, Path):
+            raise AttestationStoreConfigurationError(
+                "The PAI file path setting is invalid."
+            )
+
+        try:
+            pem_data = value.read_bytes()
+        except OSError as exc:
+            raise AttestationStoreValidationError(
+                "Failed to read the selected PAI certificate file."
+            ) from exc
+
+        try:
+            certificate = x509.load_pem_x509_certificate(pem_data)
+            self._pai_cert_der = certificate.public_bytes(serialization.Encoding.DER)
+        except Exception as exc:
+            raise AttestationStoreValidationError(
+                "Failed to convert the selected PAI certificate PEM file."
+            ) from exc
+
 
 class CdStore:
     """
     Manage a single Certification Declaration file.
 
-    The configured DER file is read and cached in memory.
+    The CD file path is driven by the global settings module. The configured
+    DER file is read and cached in memory.
     """
 
     def __init__(self) -> None:
         """
-        Initialize an empty CD store.
+        Initialize the CD store and subscribe to settings.
         """
         self._cd_der: bytes | None = None
 
-    def set_file(self, path: str | Path) -> None:
-        """
-        Load a Certification Declaration DER file and cache its bytes.
+        app_settings.subscribe(SettingsItem.CD_FILE_PATH, self._on_setting_changed)
 
-        Args:
-            path: Path to the CD DER file.
-
-        Raises:
-            AttestationStoreValidationError: If the file is invalid.
-        """
-        file_path = Path(path).expanduser().resolve()
-
-        if not file_path.exists():
-            raise AttestationStoreValidationError(
-                "The selected Certification Declaration file does not exist."
-            )
-
-        if not file_path.is_file():
-            raise AttestationStoreValidationError(
-                "The selected Certification Declaration path is not a file."
-            )
-
-        if file_path.suffix.lower() != ".der":
-            raise AttestationStoreValidationError(
-                "The selected Certification Declaration file must be a .der file."
-            )
-
-        try:
-            self._cd_der = file_path.read_bytes()
-        except OSError as exc:
-            raise AttestationStoreValidationError(
-                "Failed to read the selected Certification Declaration file."
-            ) from exc
+        current_value = app_settings.get(SettingsItem.CD_FILE_PATH)
+        self._apply_file(current_value)
 
     def get_der(self) -> bytes:
         """
@@ -643,3 +607,32 @@ class CdStore:
             )
 
         return self._cd_der
+
+    def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
+        """
+        Apply CD file changes from settings.
+        """
+        if item != SettingsItem.CD_FILE_PATH:
+            return
+
+        self._apply_file(value)
+
+    def _apply_file(self, value: object | None) -> None:
+        """
+        Load and cache the current CD DER file.
+        """
+        if value is None:
+            self._cd_der = None
+            return
+
+        if not isinstance(value, Path):
+            raise AttestationStoreConfigurationError(
+                "The Certification Declaration file path setting is invalid."
+            )
+
+        try:
+            self._cd_der = value.read_bytes()
+        except OSError as exc:
+            raise AttestationStoreValidationError(
+                "Failed to read the selected Certification Declaration file."
+            ) from exc
