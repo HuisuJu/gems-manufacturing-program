@@ -40,9 +40,6 @@ class Window(ctk.CTk):
     def _show_startup_selection_dialog(self) -> str:
         """
         Show the startup selection dialog before building the main UI.
-
-        Returns:
-            Selected mode string, or an empty string if startup was canceled.
         """
         dialog = StartupSelectionDialog(self)
         return dialog.show_modal()
@@ -80,9 +77,6 @@ class Window(ctk.CTk):
     def _apply_startup_selection_to_pages(self) -> None:
         """
         Apply the startup model selection to page instances.
-
-        This method is intentionally defensive because not all pages are
-        required to support startup selection.
         """
         provisioning_page = self.pages.get("Provisioning")
         if provisioning_page is not None:

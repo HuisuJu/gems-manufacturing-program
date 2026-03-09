@@ -167,7 +167,9 @@ class SerialConnectionButton(ctk.CTkButton):
 
     def refresh(self) -> None:
         self._is_connected = self._get_effective_connected()
-        self._active_virtual = self._is_connected and self._menu.get().strip().endswith("_emulator")
+        self._active_virtual = (
+            self._is_connected and self._menu.get().strip().endswith("_emulator")
+        )
         if not self._is_transitioning:
             self._indicator.refresh()
             self._invalidate()
@@ -254,18 +256,12 @@ class SerialWidget(ctk.CTkFrame):
     def is_connected(self) -> bool:
         """
         Return whether the widget is effectively connected.
-
-        In emulator mode this reflects the virtual connection state.
-        Otherwise it reflects the real SerialManager state.
         """
         return self._virtual_connected_port is not None or self._sm.is_connected()
 
     def set_virtual_ports(self, ports: list[str]) -> None:
         """
         Replace the current virtual serial port list.
-
-        When virtual ports are configured, the refresh list shows those ports
-        instead of probing real serial ports.
         """
         normalized = [str(port).strip() for port in ports if str(port).strip()]
         self._virtual_ports = normalized
@@ -309,8 +305,6 @@ class SerialWidget(ctk.CTkFrame):
     def _connect_virtual(self, port: str) -> None:
         """
         Connect to a virtual emulator port.
-
-        This operation always succeeds.
         """
         self._virtual_connected_port = port
 

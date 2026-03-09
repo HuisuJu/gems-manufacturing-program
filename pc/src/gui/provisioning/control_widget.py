@@ -107,15 +107,13 @@ class ProvisioningControlWidget(ctk.CTkFrame):
 
         self.set_worker_indicator_state(WorkerIndicatorState.IDLE)
         self.set_status_message("Provision manager is not ready yet.")
-        self.set_next_instruction("Connect the device path and wait until provisioning becomes ready.")
+        self.set_next_instruction("Prepare the target environment first.")
         self.set_dispatcher_status(False)
         self.set_primary_button(text="START", enabled=False)
 
     def apply_manager_event(self, event: ProvisionManagerEvent) -> None:
         """
         Apply a ProvisionManagerEvent to the widget.
-
-        This is the main integration point between the GUI and ProvisionManager.
         """
         self._current_manager_event = event
 
@@ -153,9 +151,6 @@ class ProvisioningControlWidget(ctk.CTkFrame):
             self.set_next_instruction("Prepare the dispatcher/device connection first.")
 
     def set_worker_indicator_state(self, state: WorkerIndicatorState) -> None:
-        """
-        Update the large provisioning state indicator.
-        """
         self._state = state
         self.worker_indicator.configure(
             text=state.value,
@@ -163,56 +158,29 @@ class ProvisioningControlWidget(ctk.CTkFrame):
         )
 
     def set_status_message(self, text: str) -> None:
-        """
-        Update the main status message.
-        """
         self.status_message_label.configure(text=text)
 
     def set_next_instruction(self, text: str) -> None:
-        """
-        Update the next operator instruction text.
-        """
         self.next_action_label.configure(text=f"Next: {text}")
 
     def set_dispatcher_status(self, is_ready: bool) -> None:
-        """
-        Update the dispatcher readiness label.
-        """
         status_text = "Dispatcher: Ready" if is_ready else "Dispatcher: Not ready"
         self.dispatcher_status_label.configure(text=status_text)
 
     def set_primary_button(self, text: str, enabled: bool) -> None:
-        """
-        Update the primary action button text and enabled state.
-        """
         self._current_button_text = text
         self.primary_button.configure(
             text=text,
             state="normal" if enabled else "disabled",
         )
 
-    def set_start_enabled(self, enabled: bool) -> None:
-        """
-        Backward-compatible helper for older callers.
-
-        This method now simply enables or disables the primary button without
-        changing its current label.
-        """
-        self.primary_button.configure(state="normal" if enabled else "disabled")
-
     def set_user_event_listener(
         self,
         listener: Optional[Callable[[ProvisioningUserEvent], None]],
     ) -> None:
-        """
-        Register a user event listener.
-        """
         self._event_listener = listener
 
     def handle_user_event(self, name: str, message: str) -> None:
-        """
-        Emit a user event to the external listener.
-        """
         event = ProvisioningUserEvent(name=name, message=message)
         Logger.write(LogLevel.PROGRESS, f"[USER_EVENT] {event.name}: {event.message}")
         if self._event_listener is not None:
@@ -225,11 +193,6 @@ class ProvisioningControlWidget(ctk.CTkFrame):
                 )
 
     def _on_primary_button_clicked(self) -> None:
-        """
-        Handle the primary action button.
-
-        The current button role is determined by the latest manager event.
-        """
         button_text_upper = self._current_button_text.strip().upper()
 
         if button_text_upper == "FINISH":

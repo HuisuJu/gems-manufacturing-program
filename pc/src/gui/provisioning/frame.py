@@ -219,8 +219,6 @@ class ProvisioningPage(ctk.CTkFrame):
     def set_target_mode(self, target_mode: str) -> None:
         """
         Set the current target mode externally.
-
-        This method is used by Window after the startup selection dialog.
         """
         normalized = str(target_mode).strip().lower()
         if normalized not in {
@@ -238,27 +236,15 @@ class ProvisioningPage(ctk.CTkFrame):
         self._apply_target_mode(normalized)
 
     def set_provision_dispatcher(self, dispatcher: ProvisionDispatcher) -> None:
-        """
-        Configure the active provision dispatcher.
-        """
         self._provision_manager.set_dispatcher(dispatcher)
 
     def clear_provision_dispatcher(self) -> None:
-        """
-        Clear the active provision dispatcher.
-        """
         self._provision_manager.set_dispatcher(None)
 
     def set_provision_reporter(self, reporter: ProvisionReporter) -> None:
-        """
-        Replace the default provision reporter.
-        """
         self._provision_manager.set_reporter(reporter)
 
     def _on_target_mode_changed(self, selected_value: str) -> None:
-        """
-        Handle target mode selection changes from the UI.
-        """
         self._apply_target_mode(selected_value)
 
     def _apply_target_mode(self, target_mode: str) -> None:
@@ -318,15 +304,9 @@ class ProvisioningPage(ctk.CTkFrame):
         )
 
     def _on_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
-        """
-        Bridge worker-thread manager events into the Tk main thread.
-        """
         self.after(0, lambda: self._apply_provision_manager_event(event))
 
     def _apply_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
-        """
-        Apply a manager event to the provisioning control widget.
-        """
         self._provisioning_control_widget.apply_manager_event(event)
         Logger.write(
             LogLevel.PROGRESS,
@@ -338,9 +318,6 @@ class ProvisioningPage(ctk.CTkFrame):
         )
 
     def _on_provisioning_user_event(self, event) -> None:
-        """
-        Handle user actions emitted by the provisioning control widget.
-        """
         if event.name == "start_button_clicked":
             self._provision_manager.start()
             return
@@ -355,12 +332,6 @@ class ProvisioningPage(ctk.CTkFrame):
         )
 
     def _on_serial_event(self, event_name: str) -> None:
-        """
-        Handle serial widget events.
-
-        Provision UI state is no longer derived directly from raw serial
-        connection state. Dispatcher readiness is the source of truth.
-        """
         Logger.write(LogLevel.PROGRESS, f"[SERIAL] event={event_name}")
 
     def _create_titled_card(

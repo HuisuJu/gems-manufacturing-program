@@ -93,7 +93,6 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         self._ok_button.grid(row=0, column=0, padx=0, pady=0)
 
         self._mode_var.trace_add("write", lambda *_: self._update_ok_state())
-
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._show_centered()
@@ -101,26 +100,17 @@ class StartupSelectionDialog(ctk.CTkToplevel):
     def show_modal(self) -> str:
         """
         Show the dialog modally and return the selected mode.
-
-        Returns:
-            Selected mode string if confirmed, otherwise an empty string.
         """
         self.wait_window()
         return self.selected_mode if self.was_confirmed else ""
 
     def _update_ok_state(self) -> None:
-        """
-        Enable the OK button only when one mode is selected.
-        """
         selected_mode = self._mode_var.get()
         self._ok_button.configure(state="normal" if selected_mode else "disabled")
         if selected_mode:
             self._status_label.configure(text="")
 
     def _on_ok(self) -> None:
-        """
-        Confirm the current selection and close the dialog.
-        """
         selected_mode = self._mode_var.get()
 
         if not selected_mode:
@@ -133,9 +123,6 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         self.destroy()
 
     def _on_close(self) -> None:
-        """
-        Cancel startup and close the parent application.
-        """
         self.was_confirmed = False
         self.selected_mode = ""
         self.grab_release()
@@ -144,9 +131,6 @@ class StartupSelectionDialog(ctk.CTkToplevel):
             self.master.destroy()
 
     def _show_centered(self) -> None:
-        """
-        Center the dialog on screen and show it.
-        """
         def unset_topmost() -> None:
             if self.winfo_exists():
                 self.attributes("-topmost", False)
