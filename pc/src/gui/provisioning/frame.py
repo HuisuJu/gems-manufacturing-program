@@ -7,12 +7,16 @@ from stream import SerialManager
 from session import Session
 from logger import Logger, LogLevel
 
-from gui.serial_widget import SerialWidget
-from gui.log_widget import LogWidget
-from gui.provisioning_control_widget import (
-    ProvisioningControlWidget,
-    WorkerIndicatorState,
+from provision import (
+    ProvisionDispatcher,
+    ProvisionManager,
+    ProvisionManagerEvent,
+    ProvisionReporter,
 )
+
+from .serial_widget import SerialWidget
+from .log_widget import LogWidget
+from .control_widget import ProvisioningControlWidget
 
 
 class ProvisioningPage(ctk.CTkFrame):
@@ -34,6 +38,8 @@ class ProvisioningPage(ctk.CTkFrame):
 
         self._serial_manager = SerialManager(Session.on_serial_frame)
         Session.bind_serial(self._serial_manager)
+
+        self._provision_manager = ProvisionManager()
 
         self._left_2x2_panel = ctk.CTkFrame(self, fg_color="transparent")
         self._left_2x2_panel.grid(
@@ -123,9 +129,9 @@ class ProvisioningPage(ctk.CTkFrame):
             pady=(8, 12),
             sticky="nsew",
         )
-
-        self._sync_serial_state_to_provisioning_ui()
-        self._serial_manager.subscribe_event(self._on_serial_event)
+        self._provisioning_control_widget.set_user_event_listener(
+            self._on_provisioning_user_event
+        )
 
         self._log_widget = LogWidget(self)
         self._log_widget.grid(
@@ -137,8 +143,85 @@ class ProvisioningPage(ctk.CTkFrame):
             sticky="nsew",
         )
 
-    def _on_serial_event(self, _: str) -> None:
-        self.after(0, self._sync_serial_state_to_provisioning_ui)
+        self._serial_manager.subscribe_event(self._on_serial_event)
+        self._provision_manager.set_event_listener(self._on_provision_manager_event)
+
+        self.after(0, self._start_provision_manager)
+
+    def _start_provision_manager(self) -> None:
+        """
+        Start the provision manager worker thread.
+
+        The manager remains idle until a dispatcher is configured and becomes ready.
+        """
+        try:
+            self._provision_manager.start()
+        except Exception as e:
+            Logger.write(
+                LogLevel.ERROR,
+                f"Failed to start ProvisionManager ({type(e).__name__}: {e})",
+            )
+
+    def set_provision_dispatcher(self, dispatcher: ProvisionDispatcher) -> None:
+        """
+        Configure the active provision dispatcher.
+
+        This method should be called by the application once a concrete
+        dispatcher implementation is available.
+        """
+        self._provision_manager.set_dispatcher(dispatcher)
+
+    def set_provision_reporter(self, reporter: ProvisionReporter) -> None:
+        """
+        Replace the default provision reporter.
+        """
+        self._provision_manager.set_reporter(reporter)
+
+    def _on_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
+        """
+        Bridge worker-thread manager events into the Tk main thread.
+        """
+        self.after(0, lambda: self._apply_provision_manager_event(event))
+
+    def _apply_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
+        """
+        Apply a manager event to the provisioning control widget.
+        """
+        self._provisioning_control_widget.apply_manager_event(event)
+        Logger.write(
+            LogLevel.PROGRESS,
+            (
+                f"[PROVISION] state={event.ui_state.value}, "
+                f"dispatcher_ready={event.dispatcher_ready}, "
+                f"message={event.message}"
+            ),
+        )
+
+    def _on_provisioning_user_event(self, event) -> None:
+        """
+        Handle user actions emitted by the provisioning control widget.
+        """
+        if event.name == "start_button_clicked":
+            self._provision_manager.start()
+            return
+
+        if event.name == "finish_button_clicked":
+            self._provision_manager.finish()
+            return
+
+        Logger.write(
+            LogLevel.WARNING,
+            f"Unhandled provisioning user event: {event.name}",
+        )
+
+    def _on_serial_event(self, event_name: str) -> None:
+        """
+        Handle serial widget events.
+
+        Provision UI state is no longer derived directly from raw serial
+        connection state. Dispatcher readiness is the source of truth.
+        """
+        Logger.write(LogLevel.PROGRESS, f"[SERIAL] event={event_name}")
 
     def _create_titled_card(
         self,
@@ -167,57 +250,33 @@ class ProvisioningPage(ctk.CTkFrame):
         title_label.lift()
         return body
 
-    def _sync_serial_state_to_provisioning_ui(self) -> None:
-        connected = self._serial_manager.is_connected()
-        if connected:
-            self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.IDLE)
-            self._provisioning_control_widget.set_next_instruction(
-                "Place the device on jig, then press START."
-            )
-            self._provisioning_control_widget.set_start_enabled(True)
-            return
-
-        self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.DISCONNECTED)
-        self._provisioning_control_widget.set_next_instruction(
-            "Connect serial port first, then press START."
-        )
-        self._provisioning_control_widget.set_start_enabled(False)
-
-    # External API (for future provisioning flow)
-    def set_worker_indicator_idle(self) -> None:
-        self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.IDLE)
-
-    def set_worker_indicator_success(self) -> None:
-        self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.SUCCESS)
-
-    def set_worker_indicator_fail(self) -> None:
-        self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.FAIL)
-
-    def set_worker_indicator_disconnected(self) -> None:
-        self._provisioning_control_widget.set_worker_indicator_state(WorkerIndicatorState.DISCONNECTED)
-
-    def set_next_operator_instruction(self, instruction: str) -> None:
-        self._provisioning_control_widget.set_next_instruction(instruction)
-
-    def on_external_user_event(self, name: str, message: str) -> None:
-        self._provisioning_control_widget.handle_user_event(name=name, message=message)
-
     def set_qr_code_url(self, url: str) -> None:
         self._qr_code_url = str(url).strip()
 
     def _on_see_qr_code(self) -> None:
         if not self._qr_code_url:
-            Logger.write(LogLevel.PROGRESS, "[USER_EVENT] See QR code clicked (URL is not configured yet)")
+            Logger.write(
+                LogLevel.PROGRESS,
+                "[USER_EVENT] See QR code clicked (URL is not configured yet)",
+            )
             return
 
         try:
             webbrowser.open(self._qr_code_url)
-            Logger.write(LogLevel.PROGRESS, f"[USER_EVENT] Opened QR code URL: {self._qr_code_url}")
+            Logger.write(
+                LogLevel.PROGRESS,
+                f"[USER_EVENT] Opened QR code URL: {self._qr_code_url}",
+            )
         except Exception as e:
-            Logger.write(LogLevel.WARNING, f"Failed to open QR code URL ({type(e).__name__}: {e})")
+            Logger.write(
+                LogLevel.WARNING,
+                f"Failed to open QR code URL ({type(e).__name__}: {e})",
+            )
 
     def _on_save_log(self) -> None:
-        suggested_name = f"factory_provision_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        suggested_name = (
+            f"factory_provision_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
         file_path = filedialog.asksaveasfilename(
             title="Save Log",
             defaultextension=".log",
@@ -243,7 +302,10 @@ class ProvisioningPage(ctk.CTkFrame):
             Logger.write(LogLevel.PROGRESS, f"Log saved to {file_path}")
         except Exception as e:
             self._save_log_status.configure(text="Save failed")
-            Logger.write(LogLevel.ERROR, f"Log save failed ({type(e).__name__}: {e})")
+            Logger.write(
+                LogLevel.ERROR,
+                f"Log save failed ({type(e).__name__}: {e})",
+            )
 
     def _on_left_panel_resize(self, event) -> None:
         panel_width = max(int(event.width), 1)
