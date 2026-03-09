@@ -61,13 +61,27 @@ class ProvisionReporter:
     Report files are intended for human inspection, especially when a
     provisioning attempt fails. The reporter must never persist the full
     provisioning payload because it may contain sensitive values.
+
+    This class is implemented as a singleton so that all GUI and application
+    components share the same report output directory configuration.
     """
 
     DEFAULT_REPORT_DIR_NAME = "provision_reports"
 
+    _instance: Optional["ProvisionReporter"] = None
+
+    def __new__(cls, report_dir: str | Path | None = None) -> "ProvisionReporter":
+        """
+        Return the singleton instance.
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self, report_dir: str | Path | None = None) -> None:
         """
-        Initialize the reporter.
+        Initialize the singleton reporter.
 
         Args:
             report_dir:
@@ -75,16 +89,29 @@ class ProvisionReporter:
                 "provision_reports" directory under the current working
                 directory is used.
         """
+        if getattr(self, "_initialized", False):
+            if report_dir is not None:
+                self.set_report_dir(report_dir)
+            return
+
         if report_dir is None:
             self._report_dir = Path.cwd() / self.DEFAULT_REPORT_DIR_NAME
         else:
             self._report_dir = Path(report_dir).expanduser().resolve()
+
+        self._initialized = True
 
     def set_report_dir(self, report_dir: str | Path) -> None:
         """
         Set the target directory used for future report files.
         """
         self._report_dir = Path(report_dir).expanduser().resolve()
+
+    def reset_report_dir_to_default(self) -> None:
+        """
+        Reset the report output directory to the default location.
+        """
+        self._report_dir = Path.cwd() / self.DEFAULT_REPORT_DIR_NAME
 
     def get_report_dir(self) -> Path:
         """

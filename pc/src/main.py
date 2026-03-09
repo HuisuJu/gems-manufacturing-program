@@ -2,6 +2,9 @@ from gui import Window, ProvisioningPage, SettingPage
 
 
 def main() -> None:
+    """
+    Entry point of the factory provisioning tool.
+    """
     window = Window(
         [
             (ProvisioningPage, "Provisioning"),
