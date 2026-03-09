@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from logger.logger import Logger, LogRecord, LogLevel
+from logger.logger import Logger, LogRecord
 
 class LogWidget(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTkFrame, **kwargs):
@@ -27,6 +27,9 @@ class LogWidget(ctk.CTkFrame):
         Logger.subscribe(self.print)
 
     def print(self, record: LogRecord):
+        self.after(0, self._append_record, record)
+
+    def _append_record(self, record: LogRecord) -> None:
         timestamp = record.timestamp.strftime('%H:%M:%S')
 
         line = f'[{timestamp}] [{record.level.name}] {record.message}\n'

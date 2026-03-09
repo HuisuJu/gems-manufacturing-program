@@ -1,20 +1,12 @@
 import customtkinter as ctk
 import threading
 
-from connection import SerialManager
+from stream import SerialManager
 
 
 class SerialFrame(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTkFrame, title: str, **kwargs):
         super().__init__(parent, border_width=2, **kwargs)
-
-        self.title_label = ctk.CTkLabel(
-            self,
-            text=f"  {title}  ",
-            font=ctk.CTkFont(size=14),
-            fg_color=self.cget("fg_color"),
-        )
-        self.title_label.place(relx=0.5, y=10, anchor="center")
 
 
 class SerialPortOptionMenu(ctk.CTkOptionMenu):
@@ -55,6 +47,9 @@ class SerialIndicator(ctk.CTkLabel):
         self._invalidate()
 
     def _on_event(self, name: str) -> None:
+        self.after(0, self._apply_event, name)
+
+    def _apply_event(self, name: str) -> None:
         if name == "connected":
             self._state = "connected"
         elif name == "disconnected":
@@ -129,6 +124,9 @@ class SerialConnectionButton(ctk.CTkButton):
         self._invalidate()
 
     def _on_event(self, name: str) -> None:
+        self.after(0, self._apply_event)
+
+    def _apply_event(self) -> None:
         self._is_connected = self._sm.is_connected()
         if not self._is_transitioning:
             self._indicator.set_transitioning(False)
@@ -150,17 +148,27 @@ class SerialWidget(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.frame = SerialFrame(self, "Serial Connection")
+        self.frame = SerialFrame(self, "Serial Connection", corner_radius=10)
         self.frame.grid(row=0, column=0, sticky="nsew", pady=(10, 0))
 
-        for c in range(3):
-            self.frame.grid_columnconfigure(c, weight=0)
+        self.title_label = ctk.CTkLabel(
+            self,
+            text="  Serial Connection  ",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=self.master.cget("fg_color"),
+        )
+        self.title_label.place(relx=0.5, y=10, anchor="center")
+        self.title_label.lift()
 
-        self.port_menu = SerialPortOptionMenu(self.frame, width=140)
-        self.port_menu.grid(row=0, column=0, padx=(15, 5), pady=(20, 5))
+        self.frame.grid_columnconfigure(0, weight=1)
+        self.frame.grid_columnconfigure(1, weight=0)
+        self.frame.grid_columnconfigure(2, weight=0)
 
-        self.refresh_btn = SerialRefreshButton(self.frame, self.port_menu, width=80)
-        self.refresh_btn.grid(row=0, column=1, padx=(5, 10), pady=(20, 5))
+        self.port_menu = SerialPortOptionMenu(self.frame, width=220)
+        self.port_menu.grid(row=0, column=0, padx=(15, 6), pady=(20, 6), sticky="ew")
+
+        self.refresh_btn = SerialRefreshButton(self.frame, self.port_menu, width=86, height=28)
+        self.refresh_btn.grid(row=0, column=1, padx=(6, 6), pady=(20, 6), sticky="ew")
 
         self.status_indicator = SerialIndicator(self.frame, self._sm)
         self.status_indicator.grid(
@@ -168,8 +176,8 @@ class SerialWidget(ctk.CTkFrame):
             column=0,
             columnspan=3,
             padx=15,
-            pady=(0, 10),
-            sticky="e",
+            pady=(2, 14),
+            sticky="w",
         )
 
         self.connect_btn = SerialConnectionButton(
@@ -177,8 +185,9 @@ class SerialWidget(ctk.CTkFrame):
             self._sm,
             self.port_menu,
             self.status_indicator,
-            width=80,
+            width=100,
+            height=28,
         )
-        self.connect_btn.grid(row=0, column=2, padx=(0, 15), pady=(20, 5))
+        self.connect_btn.grid(row=0, column=2, padx=(6, 15), pady=(20, 6), sticky="ew")
 
         self.refresh_btn._on_click()

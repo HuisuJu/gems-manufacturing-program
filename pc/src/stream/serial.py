@@ -1,75 +1,30 @@
-"""Serial transport manager with COBS framing.
+"""Serial transport manager with factory frame transport.
 
-This module provides :class:`SerialManager`, a thin wrapper around
-``pyserial`` + ``serial.threaded.ReaderThread`` for packet-based serial I/O.
-Incoming packets are decoded with COBS and forwarded to a user callback.
-Outgoing payloads are COBS-encoded and delimited by ``0x00``.
+This module provides :class:`SerialManager` for packet-based serial I/O over
+factory frame protocol (magic ``0xFAC0`` + header + payload + CRC).
+Incoming data is parsed/reassembled and forwarded as one logical packet.
+Outgoing packets are fragmented and sent with ACK/NACK flow control.
 """
 
 import threading
+import time
+from queue import Empty, Queue
 from typing import Callable, Optional
 
 import serial
 import serial.tools.list_ports
-import serial.threaded
-from cobs import cobs
 
 from logger.logger import Logger, LogLevel
-
-
-class _SerialConnection(serial.threaded.Packetizer):
-    """ReaderThread protocol that packetizes ``0x00``-terminated frames.
-
-    :param manager: Owner serial manager used for event callbacks.
-    :type manager: SerialManager
-    """
-
-    TERMINATOR = b"\x00"
-
-    def __init__(self, manager: "SerialManager"):
-        """Initialize protocol instance.
-
-        :param manager: Owner serial manager.
-        :type manager: SerialManager
-        """
-        super().__init__()
-        self._manager = manager
-
-    def connection_made(self, transport):
-        """Handle transport open event.
-
-        :param transport: ReaderThread transport object.
-        """
-        super().connection_made(transport)
-        self._manager._on_connected()
-
-    def connection_lost(self, exc):
-        """Handle transport close event.
-
-        :param exc: Exception that caused disconnect, if any.
-        """
-        self._manager._on_disconnected()
-        super().connection_lost(exc)
-
-    def handle_packet(self, packet: bytes):
-        """Decode an incoming COBS packet and forward payload.
-
-        :param packet: Raw COBS-encoded packet without terminator.
-        :type packet: bytes
-        """
-        if not packet:
-            return
-
-        try:
-            msg = cobs.decode(packet)
-        except Exception as e:
-            Logger.write(
-                LogLevel.ERROR,
-                f"COBS decode failed ({type(e).__name__}: {e}), raw={packet.hex()}",
-            )
-            return
-
-        self._manager._on_frame_received(msg)
+from .frame_parser import (
+    FLOW_CONTROL_TIMEOUT_SEC,
+    MAX_RETRY_COUNT,
+    FRAME_TYPE_ACK,
+    PacketAssembler,
+    PacketFragmenter,
+    StreamFrameParser,
+    build_control_frame,
+    control_sequence_from_frame,
+)
 
 
 class SerialManager:
@@ -78,8 +33,6 @@ class SerialManager:
     :param packet_handler: Callback invoked with decoded payload bytes.
     :type packet_handler: Callable[[bytes], None]
     """
-
-    CONNECT_TIMEOUT = 3.0
 
     def __init__(self, packet_handler: Callable[[bytes], None]):
         """Create a new serial manager.
@@ -91,11 +44,13 @@ class SerialManager:
 
         self._lock = threading.Lock()
         self._serial: Optional[serial.Serial] = None
-        self._thread: Optional[serial.threaded.ReaderThread] = None
-        self._protocol = None
+        self._rx_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
-        self._ready = threading.Event()
         self._connected_flag = False
+
+        self._ack_queue: Queue[tuple[bool, int]] = Queue()
+        self._packet_queue: Queue[bytes] = Queue()
 
         self._event_listeners: list[Callable[[str], None]] = []
 
@@ -139,9 +94,9 @@ class SerialManager:
         """
         with self._lock:
             s = self._serial
-            t = self._thread
+            t = self._rx_thread
             ok = self._connected_flag
-        return s is not None and s.is_open and t is not None and ok
+        return s is not None and s.is_open and t is not None and t.is_alive() and ok
 
     def open(self, port: str, baudrate: int = 115200) -> bool:
         """Open serial port and start reader thread.
@@ -155,39 +110,18 @@ class SerialManager:
         """
         self.close()
 
-        with self._lock:
-            self._ready.clear()
-            self._connected_flag = False
-            self._protocol = None
-
         try:
-            s = serial.Serial(port, baudrate, timeout=0.2)
-            t = serial.threaded.ReaderThread(s, lambda: _SerialConnection(self))
+            s = serial.Serial(port, baudrate, timeout=0.05)
+            t = threading.Thread(target=self._rx_loop, name="SerialRx", daemon=True)
 
             with self._lock:
                 self._serial = s
-                self._thread = t
+                self._rx_thread = t
+                self._connected_flag = True
+                self._stop_event.clear()
 
             t.start()
-
-            try:
-                _transport, protocol = t.connect()
-            except Exception as e:
-                Logger.write(
-                    LogLevel.WARNING,
-                    f"ReaderThread connect failed ({port}, {baudrate}): {type(e).__name__}: {e}",
-                )
-                self.close()
-                return False
-
-            with self._lock:
-                self._protocol = protocol
-
-            if not self._ready.wait(timeout=self.CONNECT_TIMEOUT):
-                Logger.write(LogLevel.WARNING, f"Serial connect timeout ({port}, {baudrate})")
-                self.close()
-                return False
-
+            self._on_connected()
             return True
 
         except Exception as e:
@@ -201,23 +135,13 @@ class SerialManager:
     def close(self) -> None:
         """Close current serial connection and stop reader thread."""
         with self._lock:
-            t = self._thread
+            t = self._rx_thread
             s = self._serial
 
-            self._thread = None
+            self._rx_thread = None
             self._serial = None
-            self._protocol = None
-            self._ready.clear()
             self._connected_flag = False
-
-        if t:
-            try:
-                try:
-                    t.close()
-                except Exception:
-                    t.stop()
-            except Exception as e:
-                Logger.write(LogLevel.WARNING, f"ReaderThread stop/close failed: {type(e).__name__}: {e}")
+            self._stop_event.set()
 
         if s and s.is_open:
             try:
@@ -225,10 +149,16 @@ class SerialManager:
             except Exception as e:
                 Logger.write(LogLevel.WARNING, f"Serial close failed: {type(e).__name__}: {e}")
 
+        if t and t.is_alive():
+            t.join(timeout=0.5)
+
+        self._on_disconnected()
+
     def write(self, buf: bytes) -> bool:
         """Send one payload frame.
 
-        Payload is COBS-encoded and terminated with ``0x00``.
+        Packet is fragmented into factory frames and each frame waits for
+        ACK/NACK flow control.
 
         :param buf: Raw payload bytes.
         :type buf: bytes
@@ -236,20 +166,67 @@ class SerialManager:
         :rtype: bool
         """
         with self._lock:
-            t = self._thread
             s = self._serial
             ok = self._connected_flag
 
-        if not (t and s and s.is_open and ok):
+        if not buf:
+            Logger.write(LogLevel.WARNING, "Serial write failed: empty payload")
+            return False
+
+        if not (s and s.is_open and ok):
             Logger.write(LogLevel.WARNING, "Serial write failed: not connected")
             return False
 
         try:
-            t.write(cobs.encode(buf) + b"\x00")
+            fragmenter = PacketFragmenter(buf)
+
+            while not fragmenter.done():
+                frame_raw, sequence = fragmenter.next_frame()
+                acknowledged = False
+
+                for _ in range(MAX_RETRY_COUNT):
+                    if not self._write_serial_bytes(frame_raw):
+                        continue
+
+                    ack = self._wait_ack(sequence, FLOW_CONTROL_TIMEOUT_SEC)
+                    if ack is True:
+                        acknowledged = True
+                        break
+
+                if not acknowledged:
+                    Logger.write(LogLevel.WARNING, f"Serial write failed: frame seq={sequence} ack timeout/retry exhausted")
+                    return False
+
             return True
         except Exception as e:
             Logger.write(LogLevel.WARNING, f"Serial write failed: {type(e).__name__}: {e}")
             return False
+
+    def write_raw(self, data: bytes) -> bool:
+        """Write raw bytes directly to UART (no framing).
+
+        Used for pre-session discovery/advertisement payloads.
+        """
+        if not isinstance(data, (bytes, bytearray, memoryview)):
+            Logger.write(LogLevel.WARNING, "Serial raw write failed: data must be bytes-like")
+            return False
+        payload = bytes(data)
+        if not payload:
+            return False
+        return self._write_serial_bytes(payload)
+
+    def read(self, timeout: Optional[float] = None) -> Optional[bytes]:
+        """Read one reassembled packet.
+
+        :param timeout: Optional timeout seconds.
+        :type timeout: float | None
+        :return: One packet bytes if available, otherwise ``None``.
+        :rtype: bytes | None
+        """
+        try:
+            return self._packet_queue.get(timeout=timeout)
+        except Empty:
+            return None
 
     def publish(self, name: str) -> None:
         """Notify subscribed listeners.
@@ -271,7 +248,6 @@ class SerialManager:
         with self._lock:
             already = self._connected_flag
             self._connected_flag = True
-            self._ready.set()
 
         if not already:
             self.publish("connected")
@@ -282,19 +258,95 @@ class SerialManager:
         with self._lock:
             already = self._connected_flag
             self._connected_flag = False
-            self._ready.clear()
 
         if already:
             self.publish("disconnected")
             Logger.write(LogLevel.PROGRESS, "Serial port is disconnected!!")
 
-    def _on_frame_received(self, msg: bytes) -> None:
-        """Internal hook for decoded payload dispatch.
+    def _write_serial_bytes(self, data: bytes) -> bool:
+        with self._lock:
+            s = self._serial
+            ok = self._connected_flag
 
-        :param msg: Decoded payload bytes.
-        :type msg: bytes
-        """
+        if not (s and s.is_open and ok):
+            return False
+
         try:
-            self._packet_handler(msg)
+            s.write(data)
+            return True
         except Exception as e:
-            Logger.write(LogLevel.WARNING, f"Packet handler error: {type(e).__name__}: {e}")
+            Logger.write(LogLevel.WARNING, f"Serial write bytes failed: {type(e).__name__}: {e}")
+            return False
+
+    def _wait_ack(self, sequence: int, timeout_sec: float) -> Optional[bool]:
+        deadline = time.monotonic() + timeout_sec
+        stash: list[tuple[bool, int]] = []
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            try:
+                is_ack, seq = self._ack_queue.get(timeout=remaining)
+            except Empty:
+                break
+
+            if seq == sequence:
+                for item in stash:
+                    self._ack_queue.put(item)
+                return is_ack
+
+            stash.append((is_ack, seq))
+
+        for item in stash:
+            self._ack_queue.put(item)
+        return None
+
+    def _rx_loop(self) -> None:
+        parser = StreamFrameParser()
+        assembler = PacketAssembler()
+
+        while not self._stop_event.is_set():
+            with self._lock:
+                s = self._serial
+
+            if s is None or not s.is_open:
+                break
+
+            try:
+                raw = s.read(256)
+            except Exception as e:
+                Logger.write(LogLevel.WARNING, f"Serial read failed: {type(e).__name__}: {e}")
+                break
+
+            if not raw:
+                continue
+
+            for frame in parser.feed(raw):
+                try:
+                    if frame.frame_type in (FRAME_TYPE_ACK, FRAME_TYPE_NACK):
+                        seq = control_sequence_from_frame(frame)
+                        self._ack_queue.put((frame.frame_type == FRAME_TYPE_ACK, seq))
+                        continue
+
+                    status, packet, seq = assembler.process(frame)
+                    if status == "duplicate" and seq is not None:
+                        self._write_serial_bytes(build_control_frame(True, seq))
+                        continue
+                    if status == "error" and seq is not None:
+                        self._write_serial_bytes(build_control_frame(False, seq))
+                        continue
+                    if status in ("ok", "done") and seq is not None:
+                        self._write_serial_bytes(build_control_frame(True, seq))
+
+                    if status == "done" and packet is not None:
+                        self._packet_queue.put(packet)
+                        try:
+                            self._packet_handler(packet)
+                        except Exception as e:
+                            Logger.write(LogLevel.WARNING, f"Packet handler error: {type(e).__name__}: {e}")
+                except Exception as e:
+                    Logger.write(LogLevel.WARNING, f"Frame process failed: {type(e).__name__}: {e}")
+
+        self._on_disconnected()

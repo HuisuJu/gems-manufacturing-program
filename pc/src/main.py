@@ -1,6 +1,6 @@
-from gui import Window, ProvisioningPage, SettinPage
+from gui import Window, ProvisioningPage, SettingPage
 
 if __name__ == '__main__':
     window = Window([(ProvisioningPage, 'Provisioning'), 
-                     (SettinPage, 'Setting')])
+                     (SettingPage, 'Setting')])
     window.mainloop()

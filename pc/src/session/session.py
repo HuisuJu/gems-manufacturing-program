@@ -8,7 +8,7 @@ from queue import Queue, Empty
 from typing import Optional
 
 from logger import Logger, LogLevel
-from connection import SerialManager
+from stream import SerialManager
 
 from .packet import PacketType
 from .packet_factory import PacketFactory
@@ -17,13 +17,15 @@ from .packet_parsers import DevHelloParser, DevAlertParser, InformationParser
 
 @dataclass(slots=True)
 class SessionInfo:
-    session_id: int
-    device_id: bytes
+    session_id: bytes
+    device_uuid: int
+    require_auth: bool
 
 
 class Session:
     ADV_INTERVAL_SEC = 1.0
     DEFAULT_CONNECT_TIMEOUT_SEC = 15.0
+    DEFAULT_MODEL = "doorlock"
 
     _lock = threading.Lock()
     _serial: Optional[SerialManager] = None
@@ -36,6 +38,30 @@ class Session:
 
     _hooks_registered: bool = False
     _sid_lock = threading.Lock()
+
+    _target_model: str = DEFAULT_MODEL
+    _adv_payload_by_model: dict[str, bytes] = {
+        "doorlock": b"",
+        "thermostat": b"",
+    }
+
+    @classmethod
+    def set_target_model(cls, model: str) -> None:
+        with cls._lock:
+            cls._target_model = str(model).strip().lower()
+
+    @classmethod
+    def configure_adv_payload(cls, model: str, payload: bytes) -> None:
+        model_key = str(model).strip().lower()
+        with cls._lock:
+            cls._adv_payload_by_model[model_key] = bytes(payload)
+
+    @classmethod
+    def _current_adv_payload(cls) -> bytes:
+        with cls._lock:
+            model = cls._target_model
+            payload = cls._adv_payload_by_model.get(model, b"")
+        return payload
 
     @classmethod
     def bind_serial(cls, serial_manager: SerialManager) -> None:
@@ -79,6 +105,11 @@ class Session:
         cls._ensure_hooks()
         cls._drain_queues()
 
+        adv_payload = cls._current_adv_payload()
+        if not adv_payload:
+            Logger.write(LogLevel.WARNING, "Session connect failed: PC_ADV payload is empty")
+            return False
+
         session_id = cls._alloc_session_id()
 
         deadline = time.monotonic() + float(timeout)
@@ -88,10 +119,10 @@ class Session:
             now = time.monotonic()
             if now >= next_adv:
                 try:
-                    adv = PacketFactory.build(PacketType.PC_ADV)
-                    s.write(adv.build())
+                    if not s.write_raw(adv_payload):
+                        Logger.write(LogLevel.WARNING, "PC_ADV raw write failed")
                 except Exception as e:
-                    Logger.write(LogLevel.WARNING, f"PC_ADV build/write failed: {type(e).__name__}: {e}")
+                    Logger.write(LogLevel.WARNING, f"PC_ADV raw write failed: {type(e).__name__}: {e}")
                 next_adv = now + cls.ADV_INTERVAL_SEC
 
             ctrl = cls._ctrl_get(timeout=0.1)
@@ -99,10 +130,11 @@ class Session:
                 continue
 
             if isinstance(ctrl, DevHelloParser):
-                device_id = ctrl.device_id
+                device_uuid = ctrl.device_uuid
+                require_auth = ctrl.require_auth
 
                 try:
-                    hello = PacketFactory.build(PacketType.PC_HELLO)
+                    hello = PacketFactory.build(PacketType.PC_HELLO, session_id=session_id)
                     if not s.write(hello.build()):
                         Logger.write(LogLevel.WARNING, "Session connect failed: PC_HELLO write failed")
                         cls._set_disconnected()
@@ -114,17 +146,22 @@ class Session:
 
                 with cls._lock:
                     cls._connected = True
-                    cls._info = SessionInfo(session_id=session_id, device_id=device_id)
+                    cls._info = SessionInfo(
+                        session_id=session_id,
+                        device_uuid=device_uuid,
+                        require_auth=require_auth,
+                    )
 
                 Logger.write(
                     LogLevel.PROGRESS,
-                    f"Session connected (session_id=0x{session_id:04X}, device_id={device_id.hex()})",
+                    f"Session connected (session_id={session_id.hex()}, uuid=0x{device_uuid:016X}, require_auth={require_auth})",
                 )
                 return True
 
             if isinstance(ctrl, DevAlertParser):
                 Logger.write(LogLevel.WARNING, f"DEV_ALERT during connect: {ctrl.reason.hex()}")
-                continue
+                cls._set_disconnected()
+                return False
 
         Logger.write(LogLevel.WARNING, "Session connect timeout (DEV_HELLO not received)")
         cls._set_disconnected()
@@ -139,13 +176,13 @@ class Session:
         s = cls._get_serial()
         if s is not None and s.is_connected():
             try:
-                pkt = PacketFactory.build(PacketType.PC_FINISH, session_id=info.session_id, data=b"")
+                pkt = PacketFactory.build(PacketType.PC_BYE, session_id=info.session_id, data=b"")
                 s.write(pkt.build())
             except Exception as e:
-                Logger.write(LogLevel.WARNING, f"PC_FINISH build/write failed: {type(e).__name__}: {e}")
+                Logger.write(LogLevel.WARNING, f"PC_BYE build/write failed: {type(e).__name__}: {e}")
 
         cls._set_disconnected()
-        Logger.write(LogLevel.PROGRESS, f"Session finished (session_id=0x{info.session_id:04X})")
+        Logger.write(LogLevel.PROGRESS, f"Session finished (session_id={info.session_id.hex()})")
 
     @classmethod
     def alert(cls, reason: bytes = b"") -> None:
@@ -162,7 +199,7 @@ class Session:
                 Logger.write(LogLevel.WARNING, f"PC_ALERT build/write failed: {type(e).__name__}: {e}")
 
         cls._set_disconnected()
-        Logger.write(LogLevel.WARNING, f"Session alerted (session_id=0x{info.session_id:04X})")
+        Logger.write(LogLevel.WARNING, f"Session alerted (session_id={info.session_id.hex()})")
 
     @classmethod
     def write(cls, payload: bytes) -> bool:
@@ -172,7 +209,7 @@ class Session:
             return False
 
         try:
-            pkt = PacketFactory.build(PacketType.INFORMATION, session_id=info.session_id, data=payload)
+            pkt = PacketFactory.build(PacketType.MESSAGE, session_id=info.session_id, data=payload)
             raw = pkt.build()
         except Exception as e:
             Logger.write(LogLevel.WARNING, f"Session write failed: build error: {type(e).__name__}: {e}")
@@ -242,7 +279,7 @@ class Session:
             if parser.session_id != info.session_id:
                 Logger.write(
                     LogLevel.WARNING,
-                    f"RX drop other-session INFORMATION (got=0x{parser.session_id:04X}, expected=0x{info.session_id:04X})",
+                    f"RX drop other-session INFORMATION (got={parser.session_id.hex()}, expected={info.session_id.hex()})",
                 )
                 return
 
@@ -279,9 +316,6 @@ class Session:
         cls._drain_queues()
 
     @classmethod
-    def _alloc_session_id(cls) -> int:
+    def _alloc_session_id(cls) -> bytes:
         with cls._sid_lock:
-            sid = secrets.randbits(16) & 0xFFFF
-            if sid == 0:
-                sid = 1
-            return sid
+            return secrets.token_bytes(16)

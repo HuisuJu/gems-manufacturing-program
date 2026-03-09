@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Type
+from typing import Any, Type
 
-from .packet import PacketType, MAGIC_BYTES, PacketBuilder, PacketParser
+from .packet import PacketType, PacketBuilder, PacketParser
 from .packet_builders import (
-    PcAdvBuilder,
     PcHelloBuilder,
     PcAlertBuilder,
     PcFinishBuilder,
@@ -31,17 +30,16 @@ class _ParserSpec:
 
 class PacketFactory:
     _BUILDERS: dict[PacketType, _BuilderSpec] = {
-        PacketType.PC_ADV: _BuilderSpec(PcAdvBuilder),
         PacketType.PC_HELLO: _BuilderSpec(PcHelloBuilder),
         PacketType.PC_ALERT: _BuilderSpec(PcAlertBuilder),
-        PacketType.PC_FINISH: _BuilderSpec(PcFinishBuilder),
-        PacketType.INFORMATION: _BuilderSpec(InformationBuilder),
+        PacketType.PC_BYE: _BuilderSpec(PcFinishBuilder),
+        PacketType.MESSAGE: _BuilderSpec(InformationBuilder),
     }
 
     _PARSERS: dict[PacketType, _ParserSpec] = {
         PacketType.DEV_HELLO: _ParserSpec(DevHelloParser),
         PacketType.DEV_ALERT: _ParserSpec(DevAlertParser),
-        PacketType.INFORMATION: _ParserSpec(InformationParser),
+        PacketType.MESSAGE: _ParserSpec(InformationParser),
     }
 
     @classmethod
@@ -65,13 +63,10 @@ class PacketFactory:
 
         packet = bytes(packet)
 
-        if len(packet) < 3:
+        if len(packet) < 2:
             raise ValueError("packet too short to determine type")
 
-        if packet[0:2] != MAGIC_BYTES:
-            raise ValueError("bad magic")
-
-        raw_type = packet[2]
+        raw_type = packet[1]
         try:
             pkt_type = PacketType(raw_type)
         except ValueError:

@@ -1,3 +1,4 @@
+import sys
 import customtkinter as ctk
 
 
@@ -6,7 +7,11 @@ class Window(ctk.CTk):
         super().__init__()
 
         self.title("Hyundai HT GEMS Factory Provisioning Tool")
-        self.wm_attributes("-zoomed", True)
+
+        if sys.platform.startswith("win"):
+            self.wm_attributes("-zoomed", True)
+        else:
+            self.attributes("-fullscreen", True)
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
