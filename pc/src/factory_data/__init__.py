@@ -1,21 +1,9 @@
 """
-Factory data provisioning package.
+Factory data package public API.
 
-This package provides the public interface used by the provisioning workflow
-to obtain and report factory data items.
-
-Typical usage:
-
-    from factory_data import FactoryDataProvider
-
-    provider = FactoryDataProvider()
-
-    result = provider.get()
-    data = result.data
-
-    # perform provisioning
-
-    provider.report(result.index, success=True)
+This package provides:
+    - FactoryDataProvider for provisioning-time payload retrieval/reporting
+    - FactoryDataPoolManager for pool path management and pool status handling
 """
 
 from .provider import (
@@ -26,10 +14,31 @@ from .provider import (
     FactoryDataProviderHandleError,
 )
 
+from .pool_manager import (
+    FactoryDataPoolManager,
+    FactoryDataPoolManagerError,
+    FactoryDataPoolInactiveError,
+    FactoryDataPoolPathError,
+    FactoryDataPoolLeaseError,
+    FactoryDataPoolEmptyError,
+    FactoryDataPoolReport,
+    FactoryDataPoolLease,
+)
+
 __all__ = [
+    # provider
     "FactoryDataProvider",
     "FactoryDataGetResult",
     "FactoryDataProviderError",
     "FactoryDataProviderInProgressError",
     "FactoryDataProviderHandleError",
+    # pool manager
+    "FactoryDataPoolManager",
+    "FactoryDataPoolManagerError",
+    "FactoryDataPoolInactiveError",
+    "FactoryDataPoolPathError",
+    "FactoryDataPoolLeaseError",
+    "FactoryDataPoolEmptyError",
+    "FactoryDataPoolReport",
+    "FactoryDataPoolLease",
 ]
