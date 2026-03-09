@@ -13,6 +13,7 @@ from provision import (
     ProvisionManagerEvent,
     ProvisionReporter,
 )
+from emulator.dispatcher import EmulatorDispatcher
 
 from .serial_widget import SerialWidget
 from .log_widget import LogWidget
@@ -22,6 +23,15 @@ from .control_widget import ProvisioningControlWidget
 class ProvisioningPage(ctk.CTkFrame):
     NUM_COLUMNS = 2
     NUM_ROWS = 2
+
+    TARGET_DOORLOCK = "doorlock"
+    TARGET_THERMOSTAT = "thermostat"
+    TARGET_EMULATOR = "emulator"
+
+    EMULATOR_PORTS = [
+        "doorlock_emulator",
+        "thermostat_emulator",
+    ]
 
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
@@ -35,6 +45,7 @@ class ProvisioningPage(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         self._qr_code_url: str = ""
+        self._current_target_mode = ctk.StringVar(value=self.TARGET_EMULATOR)
 
         self._serial_manager = SerialManager(Session.on_serial_frame)
         Session.bind_serial(self._serial_manager)
@@ -83,16 +94,66 @@ class ProvisioningPage(ctk.CTkFrame):
         )
         self._see_qr_button.grid(row=1, column=0, padx=16, pady=(30, 14), sticky="ew")
 
-        self._empty_widget = self._create_titled_card(
+        self._target_widget = self._create_titled_card(
             self._left_2x2_panel,
-            title="empty",
+            title="Target",
             row=1,
             column=0,
             padx=(0, self._card_gap),
             pady=(0, 0),
         )
-        self._empty_widget.grid_columnconfigure(0, weight=1)
-        self._empty_widget.grid_rowconfigure(1, weight=1)
+        self._target_widget.grid_columnconfigure(0, weight=1)
+        self._target_widget.grid_rowconfigure(0, weight=0)
+        self._target_widget.grid_rowconfigure(1, weight=0)
+        self._target_widget.grid_rowconfigure(2, weight=1)
+
+        self._target_mode_label = ctk.CTkLabel(
+            self._target_widget,
+            text="Provisioning target mode",
+            anchor="w",
+            justify="left",
+        )
+        self._target_mode_label.grid(
+            row=0,
+            column=0,
+            padx=16,
+            pady=(24, 8),
+            sticky="ew",
+        )
+
+        self._target_mode_menu = ctk.CTkOptionMenu(
+            self._target_widget,
+            values=[
+                self.TARGET_DOORLOCK,
+                self.TARGET_THERMOSTAT,
+                self.TARGET_EMULATOR,
+            ],
+            variable=self._current_target_mode,
+            command=self._on_target_mode_changed,
+        )
+        self._target_mode_menu.grid(
+            row=1,
+            column=0,
+            padx=16,
+            pady=(0, 10),
+            sticky="ew",
+        )
+
+        self._target_mode_status = ctk.CTkLabel(
+            self._target_widget,
+            text="",
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+            justify="left",
+            wraplength=220,
+        )
+        self._target_mode_status.grid(
+            row=2,
+            column=0,
+            padx=16,
+            pady=(0, 12),
+            sticky="ew",
+        )
 
         self._log_management_widget = self._create_titled_card(
             self._left_2x2_panel,
@@ -146,36 +207,115 @@ class ProvisioningPage(ctk.CTkFrame):
         self._serial_manager.subscribe_event(self._on_serial_event)
         self._provision_manager.set_event_listener(self._on_provision_manager_event)
 
-        self.after(0, self._start_provision_manager)
+        self.after(0, self._initialize_provision_environment)
 
-    def _start_provision_manager(self) -> None:
+    def _initialize_provision_environment(self) -> None:
         """
-        Start the provision manager worker thread.
+        Initialize dispatcher selection and start the manager thread.
+        """
+        self._apply_target_mode(self._current_target_mode.get())
+        self._provision_manager.start()
 
-        The manager remains idle until a dispatcher is configured and becomes ready.
+    def set_target_mode(self, target_mode: str) -> None:
         """
-        try:
-            self._provision_manager.start()
-        except Exception as e:
+        Set the current target mode externally.
+
+        This method is used by Window after the startup selection dialog.
+        """
+        normalized = str(target_mode).strip().lower()
+        if normalized not in {
+            self.TARGET_DOORLOCK,
+            self.TARGET_THERMOSTAT,
+            self.TARGET_EMULATOR,
+        }:
             Logger.write(
-                LogLevel.ERROR,
-                f"Failed to start ProvisionManager ({type(e).__name__}: {e})",
+                LogLevel.WARNING,
+                f"[PROVISION] Ignored invalid target mode: {target_mode}",
             )
+            return
+
+        self._current_target_mode.set(normalized)
+        self._apply_target_mode(normalized)
 
     def set_provision_dispatcher(self, dispatcher: ProvisionDispatcher) -> None:
         """
         Configure the active provision dispatcher.
-
-        This method should be called by the application once a concrete
-        dispatcher implementation is available.
         """
         self._provision_manager.set_dispatcher(dispatcher)
+
+    def clear_provision_dispatcher(self) -> None:
+        """
+        Clear the active provision dispatcher.
+        """
+        self._provision_manager.set_dispatcher(None)
 
     def set_provision_reporter(self, reporter: ProvisionReporter) -> None:
         """
         Replace the default provision reporter.
         """
         self._provision_manager.set_reporter(reporter)
+
+    def _on_target_mode_changed(self, selected_value: str) -> None:
+        """
+        Handle target mode selection changes from the UI.
+        """
+        self._apply_target_mode(selected_value)
+
+    def _apply_target_mode(self, target_mode: str) -> None:
+        """
+        Apply the selected target mode by configuring an appropriate dispatcher
+        and serial port source.
+        """
+        target_mode = str(target_mode).strip().lower()
+
+        if target_mode == self.TARGET_EMULATOR:
+            dispatcher = EmulatorDispatcher(
+                initial_ready=True,
+                dispatch_delay_sec=1.0,
+                default_success=True,
+            )
+            self.set_provision_dispatcher(dispatcher)
+            self._serial_widget.set_virtual_ports(self.EMULATOR_PORTS)
+            self._target_mode_status.configure(
+                text="Emulator dispatcher is active. Use *_emulator virtual ports."
+            )
+            Logger.write(
+                LogLevel.PROGRESS,
+                "[PROVISION] Target mode changed to emulator.",
+            )
+            return
+
+        if target_mode == self.TARGET_DOORLOCK:
+            self.clear_provision_dispatcher()
+            self._serial_widget.clear_virtual_ports()
+            self._target_mode_status.configure(
+                text="Doorlock dispatcher is not implemented yet. Real serial ports are shown."
+            )
+            Logger.write(
+                LogLevel.WARNING,
+                "[PROVISION] Doorlock dispatcher is not implemented yet.",
+            )
+            return
+
+        if target_mode == self.TARGET_THERMOSTAT:
+            self.clear_provision_dispatcher()
+            self._serial_widget.clear_virtual_ports()
+            self._target_mode_status.configure(
+                text="Thermostat dispatcher is not implemented yet. Real serial ports are shown."
+            )
+            Logger.write(
+                LogLevel.WARNING,
+                "[PROVISION] Thermostat dispatcher is not implemented yet.",
+            )
+            return
+
+        self.clear_provision_dispatcher()
+        self._serial_widget.clear_virtual_ports()
+        self._target_mode_status.configure(text="Unknown target mode.")
+        Logger.write(
+            LogLevel.WARNING,
+            f"[PROVISION] Unknown target mode: {target_mode}",
+        )
 
     def _on_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
         """
