@@ -1,0 +1,14 @@
+# nanopb options for factory_command.proto
+
+# String field size limits (adjust based on your requirements)
+*.error_message max_size:128
+
+# Array size limits
+ReadRequest.fields max_count:32
+ReadResponse.field_data max_count:32
+WriteRequest.field_data max_count:32
+WriteResponse.written_fields max_count:32
+WriteResponse.failed_fields max_count:32
+
+# FieldDataEntry data size limit (adjust based on largest certificate/key)
+FieldDataEntry.data max_size:1024

@@ -1,0 +1,12 @@
+# nanopb options for factory_matter_data.proto
+
+# Matter certificate and key size limits (based on Matter spec)
+MatterAttestation.dac_cert max_size:600
+MatterAttestation.dac_private_key max_size:128
+MatterAttestation.pai_cert max_size:600
+MatterAttestation.certification_declaration max_size:512
+
+# SPAKE2+ field size limits
+MatterCommissioning.spake2p_salt max_size:32
+MatterCommissioning.spake2p_verifier max_size:97
+MatterCommissioning.onboarding_payload max_size:256

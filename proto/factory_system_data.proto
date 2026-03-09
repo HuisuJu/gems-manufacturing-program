@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package factory;
+
+// -----------------------------------------------------------------------------
+// Base system information (common interface for all devices)
+// Each device model should extend this with their specific fields
+// -----------------------------------------------------------------------------
+message SystemData {
+  // Device serial number
+  optional string serial_number = 1;
+
+  // Manufacturing date (ISO 8601 format: YYYY-MM-DD)
+  optional string manufacturing_date = 2;
+
+  // Hardware version
+  optional string hardware_version = 3;
+
+  // Firmware version at manufacturing
+  optional string firmware_version = 4;
+}

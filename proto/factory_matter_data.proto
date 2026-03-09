@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package factory;
+
+// -----------------------------------------------------------------------------
+// Matter-specific factory data (common across all Matter devices)
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// Matter Attestation Data
+// -----------------------------------------------------------------------------
+message MatterAttestation {
+  // Device Attestation Certificate (DAC)
+  optional bytes dac_cert = 1;
+
+  // Device Attestation Certificate Public Key
+  optional bytes dac_public_key = 2
+
+  // Device Attestation Certificate Private Key
+  optional bytes dac_private_key = 3;
+
+  // Product Attestation Intermediate Certificate (PAI)
+  optional bytes pai_cert = 4;
+
+  // Certification Declaration
+  optional bytes certification_declaration = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Matter Commissioning Data (SPAKE2+ and onboarding)
+// -----------------------------------------------------------------------------
+message MatterCommissioning {
+  // SPAKE2+ setup passcode (used for pairing)
+  optional uint32 spake2p_passcode = 1;
+
+  // SPAKE2+ salt (32 bytes recommended)
+  optional bytes spake2p_salt = 2;
+
+  // SPAKE2+ iteration count (number of PBKDF2 iterations)
+  optional uint32 spake2p_iteration_count = 3;
+
+  // SPAKE2+ verifier (computed from passcode, salt, and iteration count)
+  optional bytes spake2p_verifier = 4;
+
+  // QR code / manual pairing code payload
+  optional string onboarding_payload = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Complete Matter factory data
+// -----------------------------------------------------------------------------
+message MatterFactoryData {
+  optional MatterAttestation   attestation   = 1;
+  optional MatterCommissioning commissioning = 2;
+}

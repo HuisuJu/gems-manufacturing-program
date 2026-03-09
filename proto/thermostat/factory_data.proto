@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package factory.thermostat;
+
+import "factory_system_data.proto";
+import "factory_matter_data.proto";
+
+// -----------------------------------------------------------------------------
+// Thermostat-specific factory data
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// Thermostat system information (extends base SystemData)
+// -----------------------------------------------------------------------------
+message ThermostatSystemData {
+  // Base system fields (common across all devices)
+  optional factory.SystemData base = 1;
+
+  // Thermostat-specific system fields
+  // Add any thermostat-specific system information here
+  // For example: sensor type, display type, etc.
+}
+
+// -----------------------------------------------------------------------------
+// Thermostat-specific configuration
+// -----------------------------------------------------------------------------
+message ThermostatSpecificData {
+  // Temperature sensor calibration offset (in 0.01°C units)
+  optional int32 temperature_calibration_offset = 1;
+
+  // Humidity sensor calibration offset (in 0.01% units)
+  optional int32 humidity_calibration_offset = 2;
+
+  // Add other thermostat-specific fields as needed
+}
+
+// -----------------------------------------------------------------------------
+// Complete thermostat factory data
+// -----------------------------------------------------------------------------
+message ThermostatFactoryData {
+  // Thermostat system information (model-specific)
+  optional ThermostatSystemData system = 1;
+
+  // Matter common data (same across all Matter devices)
+  optional factory.MatterFactoryData matter = 2;
+
+  // Thermostat-specific configuration
+  optional ThermostatSpecificData specific = 3;
+}
