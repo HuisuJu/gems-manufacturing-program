@@ -10,9 +10,7 @@ class Window(ctk.CTk):
 
         if sys.platform.startswith("win"):
             self.wm_attributes("-zoomed", True)
-        else:
-            self.attributes("-fullscreen", True)
-
+        
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
