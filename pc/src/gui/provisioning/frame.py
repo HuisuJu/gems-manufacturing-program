@@ -1,7 +1,5 @@
 import customtkinter as ctk
 import webbrowser
-from datetime import datetime
-from tkinter import filedialog
 
 from stream import SerialManager
 from session import Session
@@ -16,7 +14,8 @@ from provision import (
 from emulator.dispatcher import EmulatorDispatcher
 
 from .serial_widget import SerialWidget
-from .log_widget import LogWidget
+from .log_box_widget import LogBoxWidget
+from .log_setting_widget import LogSettingWidget
 from .control_widget import ProvisioningControlWidget
 
 
@@ -164,23 +163,29 @@ class ProvisioningPage(ctk.CTkFrame):
             pady=(0, 0),
         )
         self._log_management_widget.grid_columnconfigure(0, weight=1)
-        self._log_management_widget.grid_rowconfigure(1, weight=1)
+        self._log_management_widget.grid_rowconfigure(0, weight=1)
 
-        self._save_log_button = ctk.CTkButton(
-            self._log_management_widget,
-            text="Save Log",
-            command=self._on_save_log,
-            height=34,
+        self._log_box_widget = LogBoxWidget(self)
+        self._log_box_widget.grid(
+            row=1,
+            column=0,
+            columnspan=self.NUM_COLUMNS,
+            padx=self._outer_margin,
+            pady=(0, 20),
+            sticky="nsew",
         )
-        self._save_log_button.grid(row=1, column=0, padx=16, pady=(30, 8), sticky="ew")
 
-        self._save_log_status = ctk.CTkLabel(
+        self._log_setting_widget = LogSettingWidget(
             self._log_management_widget,
-            text="Ready",
-            font=ctk.CTkFont(size=12),
-            anchor="w",
+            log_box_widget=self._log_box_widget,
         )
-        self._save_log_status.grid(row=2, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self._log_setting_widget.grid(
+            row=0,
+            column=0,
+            padx=8,
+            pady=(18, 8),
+            sticky="nsew",
+        )
 
         self._provisioning_control_widget = ProvisioningControlWidget(self)
         self._provisioning_control_widget.grid(
@@ -192,16 +197,6 @@ class ProvisioningPage(ctk.CTkFrame):
         )
         self._provisioning_control_widget.set_user_event_listener(
             self._on_provisioning_user_event
-        )
-
-        self._log_widget = LogWidget(self)
-        self._log_widget.grid(
-            row=1,
-            column=0,
-            columnspan=self.NUM_COLUMNS,
-            padx=self._outer_margin,
-            pady=(0, 20),
-            sticky="nsew",
         )
 
         self._serial_manager.subscribe_event(self._on_serial_event)
@@ -324,6 +319,7 @@ class ProvisioningPage(ctk.CTkFrame):
 
         if event.name == "finish_button_clicked":
             self._provision_manager.finish()
+            self._log_setting_widget.handle_finish()
             return
 
         Logger.write(
@@ -382,40 +378,6 @@ class ProvisioningPage(ctk.CTkFrame):
             Logger.write(
                 LogLevel.WARNING,
                 f"Failed to open QR code URL ({type(e).__name__}: {e})",
-            )
-
-    def _on_save_log(self) -> None:
-        suggested_name = (
-            f"factory_provision_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        )
-        file_path = filedialog.asksaveasfilename(
-            title="Save Log",
-            defaultextension=".log",
-            initialfile=suggested_name,
-            filetypes=[
-                ("Log files", "*.log"),
-                ("Text files", "*.txt"),
-                ("All files", "*.*"),
-            ],
-        )
-        if not file_path:
-            self._save_log_status.configure(text="Save canceled")
-            return
-
-        try:
-            content = self._log_widget.textbox.get("1.0", "end-1c")
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-                if content and not content.endswith("\n"):
-                    f.write("\n")
-
-            self._save_log_status.configure(text=f"Saved: {file_path}")
-            Logger.write(LogLevel.PROGRESS, f"Log saved to {file_path}")
-        except Exception as e:
-            self._save_log_status.configure(text="Save failed")
-            Logger.write(
-                LogLevel.ERROR,
-                f"Log save failed ({type(e).__name__}: {e})",
             )
 
     def _on_left_panel_resize(self, event) -> None:

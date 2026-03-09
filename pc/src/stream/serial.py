@@ -14,7 +14,7 @@ from typing import Callable, Optional
 import serial
 import serial.tools.list_ports
 
-from logger.logger import Logger, LogLevel
+from logger.manager import Logger, LogLevel
 from .frame_parser import (
     FLOW_CONTROL_TIMEOUT_SEC,
     MAX_RETRY_COUNT,
