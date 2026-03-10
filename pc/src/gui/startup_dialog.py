@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import tkinter as tk
+
 import customtkinter as ctk
+
+from logger import Logger, LogLevel
 
 from settings import ModelName, SettingsItem, settings as app_settings
 
@@ -21,7 +25,15 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         self.withdraw()
         self.title("Startup Settings")
         self.resizable(False, False)
-        self.grab_set()
+        try:
+            self.grab_set()
+        except tk.TclError as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "시작 다이얼로그 모달 잠금(grab_set) 적용에 실패했습니다. "
+                "일부 환경에서 포커스 동작이 다를 수 있습니다. "
+                f"({type(exc).__name__}: {exc})",
+            )
 
         self.selected_model_name: ModelName | None = None
         self.was_confirmed: bool = False
@@ -129,22 +141,32 @@ class StartupSelectionDialog(ctk.CTkToplevel):
 
         self.selected_model_name = model_name
         self.was_confirmed = True
-        self.grab_release()
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()
 
     def _on_close(self) -> None:
         self.was_confirmed = False
         self.selected_model_name = None
-        self.grab_release()
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()
 
         if self.master is not None and self.master.winfo_exists():
             self.master.destroy()
 
     def _show_centered(self) -> None:
+
         def unset_topmost() -> None:
             if self.winfo_exists():
-                self.attributes("-topmost", False)
+                try:
+                    self.attributes("-topmost", False)
+                except tk.TclError:
+                    pass
 
         self.update_idletasks()
         width = self.winfo_reqwidth()
@@ -155,8 +177,27 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         y = (screen_height - height) // 2
 
         self.geometry(f"{width}x{height}+{x}+{y}")
-        self.deiconify()
-        self.lift()
-        self.attributes("-topmost", True)
-        self.focus_force()
+        try:
+            self.deiconify()
+            self.lift()
+        except tk.TclError as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "시작 다이얼로그 표시(deiconify/lift) 중 오류가 발생했습니다. "
+                f"({type(exc).__name__}: {exc})",
+            )
+
+        try:
+            self.attributes("-topmost", True)
+        except tk.TclError as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "시작 다이얼로그 topmost 설정에 실패했습니다. "
+                f"({type(exc).__name__}: {exc})",
+            )
+
+        try:
+            self.focus_force()
+        except tk.TclError:
+            pass
         self.after(50, unset_topmost)

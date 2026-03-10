@@ -4,6 +4,8 @@ import sys
 
 from typing import Callable
 
+import tkinter as tk
+
 import customtkinter as ctk
 
 from logger import Logger, LogLevel
@@ -49,9 +51,20 @@ class Window(ctk.CTk):
 
         self._initialize_main_layout(page_factories)
 
-        self.deiconify()
-        self.lift()
-        self.focus_force()
+        try:
+            self.deiconify()
+            self.lift()
+        except tk.TclError as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "메인 창 표시(deiconify/lift) 중 오류가 발생했습니다. "
+                f"({type(exc).__name__}: {exc})",
+            )
+
+        try:
+            self.focus_force()
+        except tk.TclError:
+            pass
 
     def _show_startup_selection_dialog(self) -> ModelName | None:
         """
@@ -77,6 +90,7 @@ class Window(ctk.CTk):
                     "기본 창 크기로 계속 진행합니다. "
                     f"({type(exc).__name__}: {exc})",
                 )
+                self.geometry("1280x800")
         else:
             try:
                 self.wm_attributes("-zoomed", True)
