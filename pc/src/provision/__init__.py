@@ -1,41 +1,38 @@
-"""
-Provisioning subsystem public API.
+"""Provisioning subsystem public API."""
 
-This package provides the provisioning workflow orchestration used by the
-factory provisioning tool. The main entry point for external modules is
-ProvisionManager.
-
-Modules:
-    dispatcher  - dispatcher interface used to send payloads to a device
-    manager     - provisioning workflow state machine
-    reporter    - provisioning result report writer
-"""
-
-from .manager import (
-    ProvisionManager,
-    ProvisionManagerEvent,
-    ProvisionUIState,
-)
-
-from .dispatcher import (
-    ProvisionDispatcher,
-    DispatchResult,
-)
-
-from .reporter import (
-    ProvisionReporter,
-    ProvisionReportRecord,
-)
+from importlib import import_module
 
 __all__ = [
-    # manager
     "ProvisionManager",
-    "ProvisionManagerEvent",
-    "ProvisionUIState",
-    # dispatcher
+    "ProvisionManagerError",
     "ProvisionDispatcher",
     "DispatchResult",
-    # reporter
     "ProvisionReporter",
+    "ProvisionReporterError",
     "ProvisionReportRecord",
 ]
+
+_EXPORT_MAP = {
+    "ProvisionManager": ".manager",
+    "ProvisionManagerError": ".manager",
+    "ProvisionDispatcher": ".dispatcher",
+    "DispatchResult": ".dispatcher",
+    "ProvisionReporter": ".reporter",
+    "ProvisionReporterError": ".reporter",
+    "ProvisionReportRecord": ".reporter",
+}
+
+
+def __getattr__(name: str) -> object:
+    module_name = _EXPORT_MAP.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

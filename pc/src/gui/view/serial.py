@@ -1,28 +1,45 @@
-import customtkinter as ctk
-import threading
-from typing import Callable, Optional
+from __future__ import annotations
 
-from stream import SerialManager
+import threading
+from typing import Callable
+
+import customtkinter as ctk
+
+from stream import Stream
+
+from .base import View
 
 
 class SerialFrame(ctk.CTkFrame):
-    def __init__(self, parent: ctk.CTkFrame, title: str, **kwargs):
+    """
+    Container frame for stream connection controls.
+    """
+
+    def __init__(self, parent: ctk.CTkFrame, title: str, **kwargs) -> None:
         super().__init__(parent, border_width=2, **kwargs)
 
 
 class SerialPortOptionMenu(ctk.CTkOptionMenu):
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    """
+    Option menu showing available stream endpoints.
+    """
+
+    def __init__(self, parent: ctk.CTkFrame, **kwargs) -> None:
         super().__init__(parent, values=["Select"], **kwargs)
 
 
 class SerialRefreshButton(ctk.CTkButton):
+    """
+    Refresh button that reloads the available endpoint list.
+    """
+
     def __init__(
         self,
         parent: ctk.CTkFrame,
         menu: ctk.CTkOptionMenu,
         get_ports: Callable[[], list[str]],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(parent, text="Refresh", command=self._on_click, **kwargs)
         self._menu = menu
         self._get_ports = get_ports
@@ -32,47 +49,60 @@ class SerialRefreshButton(ctk.CTkButton):
         if not ports:
             ports = ["Select"]
 
+        current = self._menu.get().strip()
         self._menu.configure(values=ports)
-        if self._menu.get() not in ports:
+
+        if current in ports:
+            self._menu.set(current)
+        else:
             self._menu.set(ports[0])
 
 
 class SerialIndicator(ctk.CTkLabel):
+    """
+    Connection state indicator for the stream transport.
+    """
+
     def __init__(
         self,
         parent: ctk.CTkFrame,
-        serial_manager: SerialManager,
-        get_effective_connected: Callable[[], bool],
+        stream: Stream,
+        get_connected: Callable[[], bool],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(parent, **kwargs)
 
-        self._sm = serial_manager
-        self._get_effective_connected = get_effective_connected
-        self._state: str = "connected" if self._get_effective_connected() else "disconnected"
+        self._stream = stream
+        self._get_connected = get_connected
+        self._state: str = "connected" if self._get_connected() else "disconnected"
         self._invalidate()
 
-        self._sm.subscribe_event(self._on_event)
+        self._stream.subscribe_event(self._on_event)
 
     def set_transitioning(self, is_transitioning: bool) -> None:
+        """
+        Update the indicator to show a transitional state.
+        """
         if is_transitioning:
             self._state = "connecting"
         else:
-            self._state = "connected" if self._get_effective_connected() else "disconnected"
+            self._state = "connected" if self._get_connected() else "disconnected"
         self._invalidate()
 
     def refresh(self) -> None:
-        self._state = "connected" if self._get_effective_connected() else "disconnected"
+        """
+        Refresh the indicator from the stream connection state.
+        """
+        self._state = "connected" if self._get_connected() else "disconnected"
         self._invalidate()
 
-    def _on_event(self, name: str) -> None:
-        self.after(0, self._apply_event, name)
-
-    def _apply_event(self, _: str) -> None:
-        self._state = "connected" if self._get_effective_connected() else "disconnected"
-        self._invalidate()
+    def _on_event(self, _: str) -> None:
+        self.after(0, self.refresh)
 
     def _invalidate(self) -> None:
+        """
+        Apply the current visual state.
+        """
         if self._state == "connecting":
             self.configure(text="● Connecting...", text_color="orange")
         elif self._state == "connected":
@@ -80,38 +110,45 @@ class SerialIndicator(ctk.CTkLabel):
         else:
             self.configure(text="● Disconnected", text_color="red")
 
+    def destroy(self) -> None:
+        """
+        Release stream subscriptions.
+        """
+        self._stream.unsubscribe_event(self._on_event)
+        super().destroy()
+
 
 class SerialConnectionButton(ctk.CTkButton):
+    """
+    Connect/disconnect button for a generic stream endpoint.
+    """
+
     def __init__(
         self,
         parent: ctk.CTkFrame,
-        serial_manager: SerialManager,
+        stream: Stream,
         menu: ctk.CTkOptionMenu,
         indicator: SerialIndicator,
-        get_effective_connected: Callable[[], bool],
-        is_virtual_port: Callable[[str], bool],
-        connect_virtual: Callable[[str], None],
-        disconnect_virtual: Callable[[], None],
+        get_connected: Callable[[], bool],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(parent, command=self._on_click, **kwargs)
 
-        self._sm = serial_manager
+        self._stream = stream
         self._menu = menu
         self._indicator = indicator
-        self._get_effective_connected = get_effective_connected
-        self._is_virtual_port = is_virtual_port
-        self._connect_virtual = connect_virtual
-        self._disconnect_virtual = disconnect_virtual
+        self._get_connected = get_connected
 
-        self._is_connected = self._get_effective_connected()
+        self._is_connected = self._get_connected()
         self._is_transitioning = False
-        self._active_virtual = False
         self._invalidate()
 
-        self._sm.subscribe_event(self._on_event)
+        self._stream.subscribe_event(self._on_event)
 
     def _on_click(self) -> None:
+        """
+        Handle button click.
+        """
         if self._is_transitioning:
             return
 
@@ -120,56 +157,48 @@ class SerialConnectionButton(ctk.CTkButton):
         self.configure(state="disabled")
 
         if self._is_connected:
-            if self._active_virtual:
-                threading.Thread(target=self._do_disconnect_virtual, daemon=True).start()
-            else:
-                threading.Thread(target=self._do_disconnect_real, daemon=True).start()
+            threading.Thread(target=self._do_disconnect, daemon=True).start()
             return
 
         threading.Thread(target=self._do_connect, daemon=True).start()
 
     def _do_connect(self) -> None:
+        """
+        Connect to the currently selected endpoint.
+        """
         try:
             port = self._menu.get().strip()
             if not port or port == "Select":
                 return
 
-            if self._is_virtual_port(port):
-                self._connect_virtual(port)
-                self._active_virtual = True
-                return
-
-            self._sm.open(port=port)
-            self._active_virtual = False
+            self._stream.open(port=port)
         finally:
             self.after(0, self._finish_transition)
 
-    def _do_disconnect_real(self) -> None:
+    def _do_disconnect(self) -> None:
+        """
+        Disconnect the stream transport.
+        """
         try:
-            self._sm.close()
-            self._active_virtual = False
-        finally:
-            self.after(0, self._finish_transition)
-
-    def _do_disconnect_virtual(self) -> None:
-        try:
-            self._disconnect_virtual()
-            self._active_virtual = False
+            self._stream.close()
         finally:
             self.after(0, self._finish_transition)
 
     def _finish_transition(self) -> None:
-        self._is_connected = self._get_effective_connected()
+        """
+        Finalize one connect or disconnect transition.
+        """
+        self._is_connected = self._get_connected()
         self._is_transitioning = False
         self.configure(state="normal")
         self._indicator.set_transitioning(False)
         self._invalidate()
 
     def refresh(self) -> None:
-        self._is_connected = self._get_effective_connected()
-        self._active_virtual = (
-            self._is_connected and self._menu.get().strip().endswith("_emulator")
-        )
+        """
+        Refresh the button state.
+        """
+        self._is_connected = self._get_connected()
         if not self._is_transitioning:
             self._indicator.refresh()
             self._invalidate()
@@ -178,19 +207,34 @@ class SerialConnectionButton(ctk.CTkButton):
         self.after(0, self.refresh)
 
     def _invalidate(self) -> None:
+        """
+        Apply the current button label.
+        """
         if self._is_connected:
             self.configure(text="Disconnect")
         else:
             self.configure(text="Connect")
 
+    def destroy(self) -> None:
+        """
+        Release stream subscriptions.
+        """
+        self._stream.unsubscribe_event(self._on_event)
+        super().destroy()
 
-class SerialWidget(ctk.CTkFrame):
-    def __init__(self, parent: ctk.CTkFrame, serial_manager: SerialManager, **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
 
-        self._sm = serial_manager
-        self._virtual_ports: list[str] = []
-        self._virtual_connected_port: Optional[str] = None
+class SerialView(View):
+    """
+    Stream connection view.
+
+    This view depends only on the Stream interface and does not distinguish
+    between real serial transports and emulator transports.
+    """
+
+    def __init__(self, parent: ctk.CTkFrame, stream: Stream, **kwargs) -> None:
+        super().__init__(parent, **kwargs)
+
+        self._stream = stream
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -225,7 +269,7 @@ class SerialWidget(ctk.CTkFrame):
 
         self.status_indicator = SerialIndicator(
             self.frame,
-            self._sm,
+            self._stream,
             self.is_connected,
         )
         self.status_indicator.grid(
@@ -239,77 +283,63 @@ class SerialWidget(ctk.CTkFrame):
 
         self.connect_btn = SerialConnectionButton(
             self.frame,
-            self._sm,
+            self._stream,
             self.port_menu,
             self.status_indicator,
             self.is_connected,
-            self._is_virtual_port,
-            self._connect_virtual,
-            self._disconnect_virtual,
             width=100,
             height=28,
         )
         self.connect_btn.grid(row=0, column=2, padx=(6, 15), pady=(20, 6), sticky="ew")
 
-        self.refresh_btn._on_click()
+        self._event_handlers = {
+            "refresh": self.refresh,
+            "refresh_ports": self.refresh_ports,
+            "connect": self.connect,
+            "disconnect": self.disconnect,
+        }
+
+        self.refresh_ports()
 
     def is_connected(self) -> bool:
         """
-        Return whether the widget is effectively connected.
+        Return whether the stream is currently connected.
         """
-        return self._virtual_connected_port is not None or self._sm.is_connected()
+        return self._stream.is_connected()
 
-    def set_virtual_ports(self, ports: list[str]) -> None:
+    def refresh_ports(self) -> None:
         """
-        Replace the current virtual serial port list.
+        Refresh the visible endpoint list.
         """
-        normalized = [str(port).strip() for port in ports if str(port).strip()]
-        self._virtual_ports = normalized
-
-        if self._virtual_connected_port is not None:
-            if self._virtual_connected_port not in self._virtual_ports:
-                self._virtual_connected_port = None
-
         self.refresh_btn._on_click()
+
+    def refresh(self) -> None:
+        """
+        Refresh the full stream connection UI state.
+        """
+        self.refresh_ports()
         self.status_indicator.refresh()
         self.connect_btn.refresh()
 
-    def clear_virtual_ports(self) -> None:
+    def connect(self) -> None:
         """
-        Disable virtual port mode and return to real serial port listing.
+        Request a connection using the currently selected endpoint.
         """
-        self._virtual_ports = []
-        self._virtual_connected_port = None
-        self.refresh_btn._on_click()
-        self.status_indicator.refresh()
-        self.connect_btn.refresh()
+        if not self.is_connected():
+            self.connect_btn._on_click()
+
+    def disconnect(self) -> None:
+        """
+        Request disconnection from the current endpoint.
+        """
+        if self.is_connected():
+            self.connect_btn._on_click()
 
     def _get_available_ports(self) -> list[str]:
         """
-        Return the current port list to be shown in the option menu.
+        Return the current endpoint list to be shown in the option menu.
         """
-        if self._virtual_ports:
-            return list(self._virtual_ports)
-
-        ports = SerialManager.list_ports()
+        ports = self._stream.list_ports()
         if not ports:
             return ["Select"]
         return ports
-
-    def _is_virtual_port(self, port: str) -> bool:
-        """
-        Return whether the given port is a configured virtual emulator port.
-        """
-        return port in self._virtual_ports or port.strip().endswith("_emulator")
-
-    def _connect_virtual(self, port: str) -> None:
-        """
-        Connect to a virtual emulator port.
-        """
-        self._virtual_connected_port = port
-
-    def _disconnect_virtual(self) -> None:
-        """
-        Disconnect from the current virtual emulator port.
-        """
-        self._virtual_connected_port = None

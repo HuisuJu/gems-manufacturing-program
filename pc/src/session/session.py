@@ -8,7 +8,7 @@ from queue import Queue, Empty
 from typing import Optional
 
 from logger import Logger, LogLevel
-from stream import SerialManager
+from stream import SerialStream
 
 from .packet import PacketType
 from .packet_factory import PacketFactory
@@ -28,7 +28,7 @@ class Session:
     DEFAULT_MODEL = "doorlock"
 
     _lock = threading.Lock()
-    _serial: Optional[SerialManager] = None
+    _serial: Optional[SerialStream] = None
 
     _connected: bool = False
     _info: Optional[SessionInfo] = None
@@ -64,14 +64,14 @@ class Session:
         return payload
 
     @classmethod
-    def bind_serial(cls, serial_manager: SerialManager) -> None:
+    def bind_serial(cls, serial_manager: SerialStream) -> None:
         with cls._lock:
             cls._serial = serial_manager
             cls._hooks_registered = False
         cls._ensure_hooks()
 
     @classmethod
-    def _get_serial(cls) -> Optional[SerialManager]:
+    def _get_serial(cls) -> Optional[SerialStream]:
         with cls._lock:
             return cls._serial
 

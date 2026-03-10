@@ -1,5 +1,9 @@
-from .serial import SerialManager
+from .base import Stream, StreamEventListener
+
+from .serial import SerialStream
 
 __all__ = [
-    "SerialManager",
+    'Stream',
+    'StreamEventListener',
+    'SerialStream',
 ]

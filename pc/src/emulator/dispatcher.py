@@ -9,14 +9,11 @@ simulates a provisioning delay, and returns a synthetic DispatchResult.
 from __future__ import annotations
 
 import json
-
 import time
-
 from typing import Any, Optional
 
 from logger import Logger, LogLevel
-
-from provision import DispatchResult, ProvisionDispatcher
+from provision.dispatcher import DispatchResult, ProvisionDispatcher, ReadyListener
 
 
 class _PayloadStats:
@@ -44,6 +41,7 @@ class EmulatorDispatcher(ProvisionDispatcher):
 
     def __init__(
         self,
+        ready_listener: ReadyListener | None = None,
         *,
         initial_ready: bool = True,
         dispatch_delay_sec: float = 1.0,
@@ -53,6 +51,8 @@ class EmulatorDispatcher(ProvisionDispatcher):
         Initialize the emulator dispatcher.
 
         Args:
+            ready_listener:
+                Callback invoked when dispatcher readiness changes.
             initial_ready:
                 Initial readiness state.
             dispatch_delay_sec:
@@ -60,12 +60,14 @@ class EmulatorDispatcher(ProvisionDispatcher):
             default_success:
                 Default dispatch result used unless overridden for the next call.
         """
-        super().__init__()
+        super().__init__(ready_listener)
         self._ready = bool(initial_ready)
         self._dispatch_delay_sec = max(0.0, float(dispatch_delay_sec))
         self._default_success = bool(default_success)
         self._next_success_override: Optional[bool] = None
         self._last_result: Optional[DispatchResult] = None
+
+        self.notify_ready_changed(self._ready)
 
     def is_ready(self) -> bool:
         """
@@ -108,15 +110,15 @@ class EmulatorDispatcher(ProvisionDispatcher):
         """
         return self._last_result
 
-    def dispatch(self, payload: dict[str, Any]) -> DispatchResult:
+    def dispatch(self, factory_data: dict[str, Any]) -> DispatchResult:
         """
-        Emulate provisioning with the supplied payload.
+        Emulate provisioning with the supplied factory data.
 
         The entire payload is traversed recursively so that every field is
         consumed by the emulator.
 
         Args:
-            payload:
+            factory_data:
                 Complete provisioning payload.
 
         Returns:
@@ -131,18 +133,18 @@ class EmulatorDispatcher(ProvisionDispatcher):
         if not self._ready:
             raise RuntimeError("Emulator dispatcher is not ready.")
 
-        if not isinstance(payload, dict):
+        if not isinstance(factory_data, dict):
             raise TypeError("Provision payload must be a dictionary.")
 
         Logger.write(
             LogLevel.PROGRESS,
             "[EMULATOR] Received payload JSON:\n"
-            f"{self._format_payload_for_log(payload)}",
+            f"{self._format_payload_for_log(factory_data)}",
         )
 
         start_time = time.monotonic()
         stats = _PayloadStats()
-        self._consume_value(payload, stats)
+        self._consume_value(factory_data, stats)
 
         if self._dispatch_delay_sec > 0.0:
             time.sleep(self._dispatch_delay_sec)
@@ -188,6 +190,9 @@ class EmulatorDispatcher(ProvisionDispatcher):
         return result
 
     def _format_payload_for_log(self, payload: dict[str, Any]) -> str:
+        """
+        Convert the payload to a formatted string for logging.
+        """
         try:
             return json.dumps(
                 payload,
@@ -197,14 +202,6 @@ class EmulatorDispatcher(ProvisionDispatcher):
             )
         except Exception:
             return repr(payload)
-
-    def close(self) -> None:
-        """
-        Release emulator resources.
-
-        No external resources are owned by this implementation.
-        """
-        return
 
     def _resolve_dispatch_success(self) -> bool:
         """

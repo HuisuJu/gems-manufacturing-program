@@ -1,32 +1,36 @@
 from __future__ import annotations
 
-import customtkinter as ctk
-
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Optional
 
-from logger import Logger, LogLevel, LogSaver, LogPresenterType
-from .log_box_widget import LogBoxWidget
+import customtkinter as ctk
+
+from logger import Logger, LogLevel, LogPresenterType, LogSaver
+
+from .base import View
+from .log_box import LogBoxView
 
 
-class LogSettingWidget(ctk.CTkFrame):
+class LogSettingsView(View):
     """
-    Provides log-related controls such as clear, save, auto-clear-on-finish,
+    Provide log-related controls such as clear, save, auto-clear-on-finish,
     and maximum visible log level.
 
-    This widget is intended to work together with LogBoxWidget.
+    This view is intended to work together with LogBoxView.
     """
 
     def __init__(
         self,
         parent: ctk.CTkFrame,
-        log_box_widget: LogBoxWidget,
+        log_box_view: LogBoxView,
         **kwargs,
-    ):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+    ) -> None:
+        """
+        Initialize the log settings view.
+        """
+        super().__init__(parent, **kwargs)
 
-        self._log_box_widget = log_box_widget
+        self._log_box_view = log_box_view
         self._auto_clear_on_finish_var = ctk.BooleanVar(value=False)
         self._level_var = ctk.StringVar(value=Logger.get_min_level().name)
 
@@ -68,16 +72,29 @@ class LogSettingWidget(ctk.CTkFrame):
         self.level_optionmenu.grid(row=0, column=4, padx=(0, 8), pady=8, sticky="w")
         self.level_optionmenu.set(Logger.get_min_level().name)
 
+        self._event_handlers = {
+            "clear": self._clear_logs,
+            "save": self._save_logs,
+            "finish": self.handle_finish,
+            "enable_auto_clear_on_finish": lambda: self.set_auto_clear_on_finish(True),
+            "disable_auto_clear_on_finish": lambda: self.set_auto_clear_on_finish(False),
+            "set_max_level_debug": lambda: self.set_max_level(LogLevel.DEBUG),
+            "set_max_level_progress": lambda: self.set_max_level(LogLevel.PROGRESS),
+            "set_max_level_info": lambda: self.set_max_level(LogLevel.INFO),
+            "set_max_level_warning": lambda: self.set_max_level(LogLevel.WARNING),
+            "set_max_level_error": lambda: self.set_max_level(LogLevel.ERROR),
+        }
+
     def _clear_logs(self) -> None:
         """
-        Clears both logger state and visible log box content.
+        Clear both logger state and visible log box content.
         """
         Logger.clear()
-        self._log_box_widget.clear()
+        self._log_box_view.clear()
 
     def _save_logs(self) -> None:
         """
-        Saves the currently visible logger records to a text file.
+        Save the currently visible logger records to a text file.
 
         The selected path is used as the base output path. The saver appends
         a timestamp suffix automatically.
@@ -113,42 +130,43 @@ class LogSettingWidget(ctk.CTkFrame):
 
     def _on_level_changed(self, value: str) -> None:
         """
-        Applies the selected logger level and refreshes the visible log box.
+        Apply the selected logger level and refresh the visible log box.
 
-        The current logger policy clears retained records when the level changes.
+        The current logger policy clears retained records when the level
+        changes.
         """
         Logger.set_min_level(LogLevel[value])
-        self._log_box_widget.clear()
+        self._log_box_view.clear()
 
     def is_auto_clear_on_finish_enabled(self) -> bool:
         """
-        Returns whether auto-clear-on-finish is enabled.
+        Return whether auto-clear-on-finish is enabled.
         """
         return bool(self._auto_clear_on_finish_var.get())
 
     def set_auto_clear_on_finish(self, enabled: bool) -> None:
         """
-        Updates the auto-clear-on-finish option.
+        Update the auto-clear-on-finish option.
         """
         self._auto_clear_on_finish_var.set(enabled)
 
     def get_max_level(self) -> LogLevel:
         """
-        Returns the currently selected maximum visible log level.
+        Return the currently selected maximum visible log level.
         """
         return LogLevel[self._level_var.get()]
 
     def set_max_level(self, level: LogLevel) -> None:
         """
-        Updates the maximum visible log level selection and logger state.
+        Update the maximum visible log level selection and logger state.
         """
         self._level_var.set(level.name)
         Logger.set_min_level(level)
-        self._log_box_widget.clear()
+        self._log_box_view.clear()
 
     def handle_finish(self) -> None:
         """
-        Applies post-finish behavior according to the current settings.
+        Apply post-finish behavior according to the current settings.
         """
         if self.is_auto_clear_on_finish_enabled():
             self._clear_logs()

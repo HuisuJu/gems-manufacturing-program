@@ -1,62 +1,42 @@
-import customtkinter as ctk
+from __future__ import annotations
+
 import webbrowser
-from pathlib import Path
 
-from factory_data import FactoryDataPoolManager, FactoryDataPoolManagerError
-from stream import SerialManager
-from session import Session
+import customtkinter as ctk
+
 from logger import Logger, LogLevel
+from settings import SettingsItem, settings as app_settings
+from stream import SerialStream
 
-from provision import (
-    ProvisionDispatcher,
-    ProvisionManager,
-    ProvisionManagerEvent,
-    ProvisionReporter,
+from .view import (
+    LogBoxView,
+    LogSettingsView,
+    ProvisioningView,
+    SerialView,
 )
-from emulator.dispatcher import EmulatorDispatcher
-
-from .widget.control_widget import ProvisioningControlWidget
-from .widget.log_box_widget import LogBoxWidget
-from .widget.log_setting_widget import LogSettingWidget
-from .widget.serial_widget import SerialWidget
 
 
 class ProvisioningFrame(ctk.CTkFrame):
     NUM_COLUMNS = 2
     NUM_ROWS = 2
 
-    TARGET_DOORLOCK = "doorlock"
-    TARGET_THERMOSTAT = "thermostat"
-    TARGET_EMULATOR = "emulator"
-
-    EMULATOR_PORTS = [
-        "doorlock_emulator",
-        "thermostat_emulator",
-    ]
-
-    EMULATOR_DEFAULT_POOL_DIRS = [
-        "doorlock",
-        "thermostat",
-    ]
-
-    def __init__(self, master, **kwargs):
+    def __init__(
+        self,
+        master: ctk.CTkFrame,
+        serial_manager: SerialStream,
+        **kwargs,
+    ) -> None:
         super().__init__(master, **kwargs)
 
         self._outer_margin = 20
         self._card_gap = 12
+        self._serial_manager = serial_manager
+        self._qr_code_url: str = ""
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=0)
         self.grid_rowconfigure(1, weight=1)
-
-        self._qr_code_url: str = ""
-        self._current_target_mode = ctk.StringVar(value=self.TARGET_EMULATOR)
-
-        self._serial_manager = SerialManager(Session.on_serial_frame)
-        Session.bind_serial(self._serial_manager)
-
-        self._provision_manager = ProvisionManager()
 
         self._left_2x2_panel = ctk.CTkFrame(self, fg_color="transparent")
         self._left_2x2_panel.grid(
@@ -72,8 +52,8 @@ class ProvisioningFrame(ctk.CTkFrame):
         self._left_2x2_panel.grid_rowconfigure(1, weight=1, uniform="left_box")
         self._left_2x2_panel.bind("<Configure>", self._on_left_panel_resize)
 
-        self._serial_widget = SerialWidget(self._left_2x2_panel, self._serial_manager)
-        self._serial_widget.grid(
+        self.serial_view = SerialView(self._left_2x2_panel, self._serial_manager)
+        self.serial_view.grid(
             row=0,
             column=0,
             padx=(0, self._card_gap),
@@ -110,16 +90,15 @@ class ProvisioningFrame(ctk.CTkFrame):
         )
         self._target_widget.grid_columnconfigure(0, weight=1)
         self._target_widget.grid_rowconfigure(0, weight=0)
-        self._target_widget.grid_rowconfigure(1, weight=0)
-        self._target_widget.grid_rowconfigure(2, weight=1)
+        self._target_widget.grid_rowconfigure(1, weight=1)
 
-        self._target_mode_label = ctk.CTkLabel(
+        self._target_label = ctk.CTkLabel(
             self._target_widget,
-            text="Provisioning target mode",
+            text="Provisioning target model",
             anchor="w",
             justify="left",
         )
-        self._target_mode_label.grid(
+        self._target_label.grid(
             row=0,
             column=0,
             padx=16,
@@ -127,25 +106,7 @@ class ProvisioningFrame(ctk.CTkFrame):
             sticky="ew",
         )
 
-        self._target_mode_menu = ctk.CTkOptionMenu(
-            self._target_widget,
-            values=[
-                self.TARGET_DOORLOCK,
-                self.TARGET_THERMOSTAT,
-                self.TARGET_EMULATOR,
-            ],
-            variable=self._current_target_mode,
-            command=self._on_target_mode_changed,
-        )
-        self._target_mode_menu.grid(
-            row=1,
-            column=0,
-            padx=16,
-            pady=(0, 10),
-            sticky="ew",
-        )
-
-        self._target_mode_status = ctk.CTkLabel(
+        self._target_status_label = ctk.CTkLabel(
             self._target_widget,
             text="",
             font=ctk.CTkFont(size=12),
@@ -153,8 +114,8 @@ class ProvisioningFrame(ctk.CTkFrame):
             justify="left",
             wraplength=220,
         )
-        self._target_mode_status.grid(
-            row=2,
+        self._target_status_label.grid(
+            row=1,
             column=0,
             padx=16,
             pady=(0, 12),
@@ -172,8 +133,8 @@ class ProvisioningFrame(ctk.CTkFrame):
         self._log_management_widget.grid_columnconfigure(0, weight=1)
         self._log_management_widget.grid_rowconfigure(0, weight=1)
 
-        self._log_box_widget = LogBoxWidget(self)
-        self._log_box_widget.grid(
+        self.log_box_view = LogBoxView(self)
+        self.log_box_view.grid(
             row=1,
             column=0,
             columnspan=self.NUM_COLUMNS,
@@ -182,11 +143,11 @@ class ProvisioningFrame(ctk.CTkFrame):
             sticky="nsew",
         )
 
-        self._log_setting_widget = LogSettingWidget(
+        self.log_settings_view = LogSettingsView(
             self._log_management_widget,
-            log_box_widget=self._log_box_widget,
+            log_box_view=self.log_box_view,
         )
-        self._log_setting_widget.grid(
+        self.log_settings_view.grid(
             row=0,
             column=0,
             padx=8,
@@ -194,208 +155,42 @@ class ProvisioningFrame(ctk.CTkFrame):
             sticky="nsew",
         )
 
-        self._provisioning_control_widget = ProvisioningControlWidget(self)
-        self._provisioning_control_widget.grid(
+        self.provisioning_view = ProvisioningView(self)
+        self.provisioning_view.grid(
             row=0,
             column=1,
             padx=(self._card_gap, self._outer_margin),
             pady=(8, 12),
             sticky="nsew",
         )
-        self._provisioning_control_widget.set_user_event_listener(
-            self._on_provisioning_user_event
-        )
 
         self._serial_manager.subscribe_event(self._on_serial_event)
-        self._provision_manager.set_event_listener(self._on_provision_manager_event)
 
-        self.after(0, self._initialize_provision_environment)
+        self.after(0, self._refresh_target_status)
 
-    def _initialize_provision_environment(self) -> None:
+    def refresh_target_status(self) -> None:
         """
-        Initialize dispatcher selection and start the manager thread.
+        Refresh the target model information shown in the target card.
         """
-        self._apply_target_mode(self._current_target_mode.get())
-        self._provision_manager.start()
+        self._refresh_target_status()
 
-    def set_target_mode(self, target_mode: str) -> None:
+    def set_qr_code_url(self, url: str) -> None:
         """
-        Set the current target mode externally.
+        Set the QR code URL opened by the result button.
         """
-        normalized = str(target_mode).strip().lower()
-        if normalized not in {
-            self.TARGET_DOORLOCK,
-            self.TARGET_THERMOSTAT,
-            self.TARGET_EMULATOR,
-        }:
-            Logger.write(
-                LogLevel.WARNING,
-                f"[PROVISION] Ignored invalid target mode: {target_mode}",
+        self._qr_code_url = str(url).strip()
+
+    def _refresh_target_status(self) -> None:
+        model_name = app_settings.get(SettingsItem.MODEL_NAME)
+
+        if model_name is None:
+            self._target_status_label.configure(
+                text="Target model is not configured yet."
             )
             return
 
-        self._current_target_mode.set(normalized)
-        self._apply_target_mode(normalized)
-
-    def set_provision_dispatcher(self, dispatcher: ProvisionDispatcher) -> None:
-        self._provision_manager.set_dispatcher(dispatcher)
-
-    def clear_provision_dispatcher(self) -> None:
-        self._provision_manager.set_dispatcher(None)
-
-    def set_provision_reporter(self, reporter: ProvisionReporter) -> None:
-        self._provision_manager.set_reporter(reporter)
-
-    def _on_target_mode_changed(self, selected_value: str) -> None:
-        self._apply_target_mode(selected_value)
-
-    def _apply_target_mode(self, target_mode: str) -> None:
-        """
-        Apply the selected target mode by configuring an appropriate dispatcher
-        and serial port source.
-        """
-        target_mode = str(target_mode).strip().lower()
-
-        if target_mode == self.TARGET_EMULATOR:
-            self._ensure_emulator_factory_data_pool()
-            dispatcher = EmulatorDispatcher(
-                initial_ready=True,
-                dispatch_delay_sec=1.0,
-                default_success=True,
-            )
-            self.set_provision_dispatcher(dispatcher)
-            self._serial_widget.set_virtual_ports(self.EMULATOR_PORTS)
-            self._target_mode_status.configure(
-                text="Emulator dispatcher is active. Use *_emulator virtual ports."
-            )
-            Logger.write(
-                LogLevel.PROGRESS,
-                "[PROVISION] Target mode changed to emulator.",
-            )
-            return
-
-        if target_mode == self.TARGET_DOORLOCK:
-            self.clear_provision_dispatcher()
-            self._serial_widget.clear_virtual_ports()
-            self._target_mode_status.configure(
-                text="Doorlock dispatcher is not implemented yet. Real serial ports are shown."
-            )
-            Logger.write(
-                LogLevel.WARNING,
-                "[PROVISION] Doorlock dispatcher is not implemented yet.",
-            )
-            return
-
-        if target_mode == self.TARGET_THERMOSTAT:
-            self.clear_provision_dispatcher()
-            self._serial_widget.clear_virtual_ports()
-            self._target_mode_status.configure(
-                text="Thermostat dispatcher is not implemented yet. Real serial ports are shown."
-            )
-            Logger.write(
-                LogLevel.WARNING,
-                "[PROVISION] Thermostat dispatcher is not implemented yet.",
-            )
-            return
-
-        self.clear_provision_dispatcher()
-        self._serial_widget.clear_virtual_ports()
-        self._target_mode_status.configure(text="Unknown target mode.")
-        Logger.write(
-            LogLevel.WARNING,
-            f"[PROVISION] Unknown target mode: {target_mode}",
-        )
-
-    def _ensure_emulator_factory_data_pool(self) -> None:
-        pool_manager = FactoryDataPoolManager()
-
-        try:
-            report = pool_manager.get_report()
-        except Exception as exc:
-            Logger.write(
-                LogLevel.WARNING,
-                f"[PROVISION] Failed to read pool report ({type(exc).__name__}: {exc})",
-            )
-            return
-
-        if report.is_ready:
-            return
-
-        fallback_path = self._find_emulator_default_pool_path()
-        if fallback_path is None:
-            Logger.write(
-                LogLevel.WARNING,
-                "[PROVISION] Emulator default factory-data path is not available.",
-            )
-            return
-
-        try:
-            pool_manager.set_pool_path(fallback_path)
-            Logger.write(
-                LogLevel.PROGRESS,
-                f"[PROVISION] Emulator pool path set to: {fallback_path}",
-            )
-        except FactoryDataPoolManagerError as exc:
-            Logger.write(
-                LogLevel.WARNING,
-                f"[PROVISION] Failed to set emulator pool path ({type(exc).__name__}: {exc})",
-            )
-
-    def _find_emulator_default_pool_path(self) -> Path | None:
-        repo_root = Path(__file__).resolve().parents[3]
-        factory_data_root = repo_root / "example" / "factory-data"
-
-        if not factory_data_root.is_dir():
-            return None
-
-        for directory_name in self.EMULATOR_DEFAULT_POOL_DIRS:
-            candidate = factory_data_root / directory_name
-            if not candidate.is_dir():
-                continue
-
-            has_json = any(
-                file_path.is_file() and file_path.suffix.lower() == ".json"
-                for file_path in candidate.iterdir()
-            )
-            if has_json:
-                return candidate
-
-        has_json_in_root = any(
-            file_path.is_file() and file_path.suffix.lower() == ".json"
-            for file_path in factory_data_root.iterdir()
-        )
-        if has_json_in_root:
-            return factory_data_root
-
-        return None
-
-    def _on_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
-        self.after(0, lambda: self._apply_provision_manager_event(event))
-
-    def _apply_provision_manager_event(self, event: ProvisionManagerEvent) -> None:
-        self._provisioning_control_widget.apply_manager_event(event)
-        Logger.write(
-            LogLevel.PROGRESS,
-            (
-                f"[PROVISION] state={event.ui_state.value}, "
-                f"dispatcher_ready={event.dispatcher_ready}, "
-                f"message={event.message}"
-            ),
-        )
-
-    def _on_provisioning_user_event(self, event) -> None:
-        if event.name == "start_button_clicked":
-            self._provision_manager.start()
-            return
-
-        if event.name == "finish_button_clicked":
-            self._provision_manager.finish()
-            self._log_setting_widget.handle_finish()
-            return
-
-        Logger.write(
-            LogLevel.WARNING,
-            f"Unhandled provisioning user event: {event.name}",
+        self._target_status_label.configure(
+            text=f"Current target: {getattr(model_name, 'value', model_name)}"
         )
 
     def _on_serial_event(self, event_name: str) -> None:
@@ -428,9 +223,6 @@ class ProvisioningFrame(ctk.CTkFrame):
         title_label.lift()
         return body
 
-    def set_qr_code_url(self, url: str) -> None:
-        self._qr_code_url = str(url).strip()
-
     def _on_see_qr_code(self) -> None:
         if not self._qr_code_url:
             Logger.write(
@@ -445,10 +237,10 @@ class ProvisioningFrame(ctk.CTkFrame):
                 LogLevel.PROGRESS,
                 f"[USER_EVENT] Opened QR code URL: {self._qr_code_url}",
             )
-        except Exception as e:
+        except Exception as exc:
             Logger.write(
                 LogLevel.WARNING,
-                f"Failed to open QR code URL ({type(e).__name__}: {e})",
+                f"Failed to open QR code URL ({type(exc).__name__}: {exc})",
             )
 
     def _on_left_panel_resize(self, event) -> None:
@@ -458,3 +250,7 @@ class ProvisioningFrame(ctk.CTkFrame):
         self._left_2x2_panel.grid_columnconfigure(1, minsize=cell_size)
         self._left_2x2_panel.grid_rowconfigure(0, minsize=cell_size)
         self._left_2x2_panel.grid_rowconfigure(1, minsize=cell_size)
+
+    def destroy(self) -> None:
+        self._serial_manager.unsubscribe_event(self._on_serial_event)
+        super().destroy()

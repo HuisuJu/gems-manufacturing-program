@@ -3,8 +3,8 @@ Provision manager.
 
 This module orchestrates the provisioning workflow in a dedicated background
 thread. It coordinates FactoryDataProvider, ProvisionDispatcher, and
-ProvisionReporter, and exposes state changes through an event queue that can be
-consumed by the UI thread.
+ProvisionReporter, and updates the injected provisioning view directly through
+named view triggers.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from factory_data import FactoryDataProvider, FactoryDataProviderError
+from gui.view.base import View
 from .dispatcher import DispatchResult, ProvisionDispatcher
 from .reporter import (
     ProvisionReportRecord,
@@ -29,18 +30,6 @@ class ProvisionManagerError(Exception):
     """
     Base exception for provision manager failures.
     """
-
-
-class ProvisionState(str, Enum):
-    """
-    External provision states exposed to observers.
-    """
-
-    IDLE = "IDLE"
-    READY = "READY"
-    PROGRESS = "PROGRESS"
-    SUCCESS = "SUCCESS"
-    FAIL = "FAIL"
 
 
 class _ManagerState(str, Enum):
@@ -66,31 +55,6 @@ class _Command(str, Enum):
     STOP = "STOP"
 
 
-@dataclass(frozen=True, slots=True)
-class ProvisionManagerEvent:
-    """
-    State notification emitted by ProvisionManager.
-
-    Attributes:
-        state:
-            Current external workflow state.
-        message:
-            Human-readable status text.
-        dispatcher_ready:
-            Current dispatcher readiness.
-        start_allowed:
-            Whether a new provisioning attempt can be started now.
-        finish_allowed:
-            Whether the current result can be finalized now.
-    """
-
-    state: ProvisionState
-    message: str
-    dispatcher_ready: bool
-    start_allowed: bool
-    finish_allowed: bool
-
-
 @dataclass(slots=True)
 class _PendingFinalization:
     """
@@ -112,18 +76,14 @@ class ProvisionManager:
     Provision workflow manager running in a dedicated worker thread.
 
     Public API:
-        - set_dispatcher()
-        - set_reporter()
         - start()
         - finish()
         - stop()
-        - poll_event()
 
     Notes:
         - start() is non-blocking and only queues a provisioning request.
         - finish() is non-blocking and finalizes the last completed attempt.
-        - Events are queued internally and should be consumed by the UI thread
-          using poll_event().
+        - The injected view is updated through named trigger calls.
         - Only one provisioning attempt can exist at a time.
         - SUCCESS/FAIL remain visible until finish() is called explicitly.
     """
@@ -131,7 +91,8 @@ class ProvisionManager:
     def __init__(
         self,
         provider: FactoryDataProvider,
-        dispatcher: ProvisionDispatcher | None = None,
+        dispatcher: ProvisionDispatcher,
+        view: View,
         reporter: ProvisionReporter | None = None,
     ) -> None:
         """
@@ -142,62 +103,27 @@ class ProvisionManager:
                 Factory data provider used for each provisioning attempt.
             dispatcher:
                 Active dispatcher implementation.
+            view:
+                Provisioning view updated through trigger() calls.
             reporter:
                 Reporter used to persist provisioning results.
         """
         self._provider = provider
-        self._dispatcher: ProvisionDispatcher | None = None
+        self._dispatcher = dispatcher
+        self._view = view
         self._reporter = reporter if reporter is not None else ProvisionReporter()
 
         self._state = _ManagerState.STOPPED
-        self._dispatcher_ready = False
+        self._dispatcher_ready = self._dispatcher.is_ready()
         self._pending: _PendingFinalization | None = None
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._command_queue: queue.Queue[_Command] = queue.Queue()
-        self._event_queue: queue.Queue[ProvisionManagerEvent] = queue.Queue()
         self._lock = threading.Lock()
 
-        if dispatcher is not None:
-            self.set_dispatcher(dispatcher)
-
-    def set_dispatcher(self, dispatcher: ProvisionDispatcher | None) -> None:
-        """
-        Set the active dispatcher implementation.
-
-        The manager installs its readiness callback into the dispatcher and
-        updates its own readiness snapshot immediately.
-
-        Args:
-            dispatcher:
-                Dispatcher instance to use, or None to clear it.
-        """
-        with self._lock:
-            self._dispatcher = dispatcher
-
-            if self._dispatcher is not None:
-                # The dispatcher base class stores the callback in this field.
-                self._dispatcher._ready_listener = self._on_dispatcher_ready_changed
-                self._dispatcher_ready = self._dispatcher.is_ready()
-            else:
-                self._dispatcher_ready = False
-
-            if self._state != _ManagerState.STOPPED:
-                self._recompute_idle_like_state_locked()
-
-        self._emit_current_state("Dispatcher configuration updated.")
-
-    def set_reporter(self, reporter: ProvisionReporter) -> None:
-        """
-        Replace the active reporter implementation.
-
-        Args:
-            reporter:
-                Reporter instance to use.
-        """
-        with self._lock:
-            self._reporter = reporter
+        # Dispatcher base class stores the readiness callback in this field.
+        self._dispatcher._ready_listener = self._on_dispatcher_ready_changed
 
     def start(self) -> None:
         """
@@ -245,15 +171,7 @@ class ProvisionManager:
             self._thread = None
             self._state = _ManagerState.STOPPED
 
-        self._emit_event(
-            ProvisionManagerEvent(
-                state=ProvisionState.IDLE,
-                message="Provision manager stopped.",
-                dispatcher_ready=self._dispatcher_ready,
-                start_allowed=False,
-                finish_allowed=False,
-            )
-        )
+        self._render_idle()
 
     def is_running(self) -> bool:
         """
@@ -261,25 +179,6 @@ class ProvisionManager:
         """
         thread = self._thread
         return thread is not None and thread.is_alive()
-
-    def poll_event(self, timeout: float | None = None) -> ProvisionManagerEvent | None:
-        """
-        Poll the next manager event.
-
-        This method is intended to be called by the UI thread.
-
-        Args:
-            timeout:
-                Maximum seconds to wait. None blocks indefinitely. Zero performs
-                a non-blocking poll.
-
-        Returns:
-            The next event, or None if the timeout elapsed.
-        """
-        try:
-            return self._event_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
 
     def _ensure_worker_started(self) -> None:
         """
@@ -311,7 +210,7 @@ class ProvisionManager:
         with self._lock:
             self._recompute_idle_like_state_locked()
 
-        self._emit_current_state("Provision manager started.")
+        self._render_current_state()
 
         while not self._stop_event.is_set():
             try:
@@ -339,37 +238,21 @@ class ProvisionManager:
 
             self._state = _ManagerState.PROGRESS
 
-        self._emit_current_state("Provisioning started.")
+        self._render_progress()
 
         started_at = self._build_iso_utc_now()
 
         try:
             factory_data = self._provider.pull()
             provider_report_required = True
-        except FactoryDataProviderError as exc:
+        except FactoryDataProviderError:
             finished_at = self._build_iso_utc_now()
             self._store_pending_result(
                 provider_report_required=False,
                 factory_data={},
                 dispatch_result=DispatchResult(
                     success=False,
-                    message=str(exc),
-                    details=None,
-                ),
-                started_at=started_at,
-                finished_at=finished_at,
-            )
-            return
-
-        dispatcher = self._get_dispatcher()
-        if dispatcher is None:
-            finished_at = self._build_iso_utc_now()
-            self._store_pending_result(
-                provider_report_required=provider_report_required,
-                factory_data=factory_data,
-                dispatch_result=DispatchResult(
-                    success=False,
-                    message="No dispatcher is configured.",
+                    message="Factory data preparation failed.",
                     details=None,
                 ),
                 started_at=started_at,
@@ -378,7 +261,7 @@ class ProvisionManager:
             return
 
         try:
-            dispatch_result = dispatcher.dispatch(factory_data)
+            dispatch_result = self._dispatcher.dispatch(factory_data)
         except Exception as exc:
             dispatch_result = DispatchResult(
                 success=False,
@@ -415,17 +298,13 @@ class ProvisionManager:
         if pending.provider_report_required:
             try:
                 self._provider.report(pending.success)
-            except Exception as exc:
+            except Exception:
                 with self._lock:
                     self._pending = None
                     self._recompute_idle_like_state_locked()
 
-                self._emit_current_state(
-                    f"Failed to finalize factory data state: {exc}"
-                )
+                self._render_current_state()
                 return
-
-        report_write_error: str | None = None
 
         try:
             self._reporter.write(
@@ -440,19 +319,14 @@ class ProvisionManager:
                     details=pending.details,
                 )
             )
-        except ProvisionReporterError as exc:
-            report_write_error = str(exc)
+        except ProvisionReporterError:
+            pass
 
         with self._lock:
             self._pending = None
             self._recompute_idle_like_state_locked()
 
-        if report_write_error is not None:
-            self._emit_current_state(
-                f"{pending.message} Report file write failed: {report_write_error}"
-            )
-        else:
-            self._emit_current_state("Provisioning finalized.")
+        self._render_current_state()
 
     def _store_pending_result(
         self,
@@ -472,7 +346,7 @@ class ProvisionManager:
             message=dispatch_result.message,
             started_at=started_at,
             finished_at=finished_at,
-            dispatcher_name=self._get_dispatcher_name(),
+            dispatcher_name=type(self._dispatcher).__name__,
             details=dispatch_result.details,
         )
 
@@ -484,7 +358,10 @@ class ProvisionManager:
                 else _ManagerState.WAITING_FINISH_FAIL
             )
 
-        self._emit_current_state(dispatch_result.message)
+        if dispatch_result.success:
+            self._render_success()
+        else:
+            self._render_fail()
 
     def _on_dispatcher_ready_changed(self, is_ready: bool) -> None:
         """
@@ -501,7 +378,7 @@ class ProvisionManager:
             }:
                 self._recompute_idle_like_state_locked()
 
-        self._emit_current_state("Dispatcher readiness changed.")
+        self._render_current_state()
 
     def _recompute_idle_like_state_locked(self) -> None:
         """
@@ -509,85 +386,96 @@ class ProvisionManager:
         """
         self._state = _ManagerState.READY if self._dispatcher_ready else _ManagerState.IDLE
 
-    def _emit_current_state(self, message: str | None = None) -> None:
+    def _render_current_state(self) -> None:
         """
-        Emit the current external state snapshot.
-        """
-        self._emit_event(self._build_event(message))
-
-    def _build_event(self, message: str | None = None) -> ProvisionManagerEvent:
-        """
-        Build an external event snapshot from the current internal state.
+        Render the current state to the view.
         """
         with self._lock:
             state = self._state
-            dispatcher_ready = self._dispatcher_ready
 
         if state == _ManagerState.READY:
-            return ProvisionManagerEvent(
-                state=ProvisionState.READY,
-                message=message or "Dispatcher is ready.",
-                dispatcher_ready=dispatcher_ready,
-                start_allowed=True,
-                finish_allowed=False,
-            )
+            self._render_ready()
+            return
 
         if state == _ManagerState.PROGRESS:
-            return ProvisionManagerEvent(
-                state=ProvisionState.PROGRESS,
-                message=message or "Provisioning in progress.",
-                dispatcher_ready=dispatcher_ready,
-                start_allowed=False,
-                finish_allowed=False,
-            )
+            self._render_progress()
+            return
 
         if state == _ManagerState.WAITING_FINISH_SUCCESS:
-            return ProvisionManagerEvent(
-                state=ProvisionState.SUCCESS,
-                message=message or "Provisioning completed successfully.",
-                dispatcher_ready=dispatcher_ready,
-                start_allowed=False,
-                finish_allowed=True,
-            )
+            self._render_success()
+            return
 
         if state == _ManagerState.WAITING_FINISH_FAIL:
-            return ProvisionManagerEvent(
-                state=ProvisionState.FAIL,
-                message=message or "Provisioning failed.",
-                dispatcher_ready=dispatcher_ready,
-                start_allowed=False,
-                finish_allowed=True,
-            )
+            self._render_fail()
+            return
 
-        return ProvisionManagerEvent(
-            state=ProvisionState.IDLE,
-            message=message or "Dispatcher is not ready.",
-            dispatcher_ready=dispatcher_ready,
-            start_allowed=False,
-            finish_allowed=False,
-        )
+        self._render_idle()
 
-    def _emit_event(self, event: ProvisionManagerEvent) -> None:
+    def _render_idle(self) -> None:
         """
-        Queue one event for consumption by the UI thread.
+        Render the idle state to the view.
         """
-        self._event_queue.put(event)
+        self._render_dispatcher_status()
+        self._safe_trigger("idle")
+        self._safe_trigger("disable_start")
+        self._safe_trigger("disable_finish")
 
-    def _get_dispatcher(self) -> ProvisionDispatcher | None:
+    def _render_ready(self) -> None:
         """
-        Return the current dispatcher.
+        Render the ready state to the view.
+        """
+        self._render_dispatcher_status()
+        self._safe_trigger("ready")
+        self._safe_trigger("enable_start")
+        self._safe_trigger("disable_finish")
+
+    def _render_progress(self) -> None:
+        """
+        Render the progress state to the view.
+        """
+        self._render_dispatcher_status()
+        self._safe_trigger("progress")
+        self._safe_trigger("disable_start")
+        self._safe_trigger("disable_finish")
+
+    def _render_success(self) -> None:
+        """
+        Render the success state to the view.
+        """
+        self._render_dispatcher_status()
+        self._safe_trigger("success")
+        self._safe_trigger("disable_start")
+        self._safe_trigger("enable_finish")
+
+    def _render_fail(self) -> None:
+        """
+        Render the failure state to the view.
+        """
+        self._render_dispatcher_status()
+        self._safe_trigger("fail")
+        self._safe_trigger("disable_start")
+        self._safe_trigger("enable_finish")
+
+    def _render_dispatcher_status(self) -> None:
+        """
+        Render dispatcher readiness to the view.
         """
         with self._lock:
-            return self._dispatcher
+            dispatcher_ready = self._dispatcher_ready
 
-    def _get_dispatcher_name(self) -> str:
+        if dispatcher_ready:
+            self._safe_trigger("dispatcher_ready")
+        else:
+            self._safe_trigger("dispatcher_not_ready")
+
+    def _safe_trigger(self, event_name: str) -> None:
         """
-        Return the active dispatcher class name.
+        Trigger one view event and ignore view-side errors.
         """
-        dispatcher = self._get_dispatcher()
-        if dispatcher is None:
-            return "UnknownDispatcher"
-        return type(dispatcher).__name__
+        try:
+            self._view.trigger(event_name)
+        except Exception:
+            return
 
     def _build_iso_utc_now(self) -> str:
         """

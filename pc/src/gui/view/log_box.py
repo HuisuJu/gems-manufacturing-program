@@ -4,16 +4,21 @@ import customtkinter as ctk
 
 from logger import Logger, LogRecord
 
+from .base import View
 
-class LogBoxWidget(ctk.CTkFrame):
+
+class LogBoxView(View):
     """
-    Displays live log records in a scrollable text box.
+    Display live log records in a scrollable text box.
 
-    The widget reflects the logger state and appends newly published
-    records in real time.
+    The view reflects the logger state and appends newly published records in
+    real time.
     """
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(self, parent: ctk.CTkFrame, **kwargs) -> None:
+        """
+        Initialize the log box view.
+        """
         super().__init__(parent, **kwargs)
 
         self._autoscroll = True
@@ -34,25 +39,32 @@ class LogBoxWidget(ctk.CTkFrame):
         self.textbox.configure(yscrollcommand=self.scrollbar.set)
         self.textbox.configure(state="disabled")
 
+        self._event_handlers = {
+            "clear": self.clear,
+            "reload": self.reload,
+            "enable_autoscroll": lambda: self.set_autoscroll(True),
+            "disable_autoscroll": lambda: self.set_autoscroll(False),
+        }
+
         self._load_existing_records()
         Logger.subscribe(self.print)
 
     def _load_existing_records(self) -> None:
         """
-        Loads retained logger records into the text box.
+        Load retained logger records into the text box.
         """
         for record in Logger.get_records():
             self._append_record(record)
 
     def print(self, record: LogRecord) -> None:
         """
-        Receives a newly accepted log record from the logger.
+        Receive a newly accepted log record from the logger.
         """
         self.after(0, self._append_record, record)
 
     def _append_record(self, record: LogRecord) -> None:
         """
-        Appends a log record to the text box.
+        Append a log record to the text box.
         """
         timestamp = record.timestamp.strftime("%H:%M:%S")
         line = f"[{timestamp}] [{record.level.name}] {record.message}\n"
@@ -66,7 +78,7 @@ class LogBoxWidget(ctk.CTkFrame):
 
     def clear(self) -> None:
         """
-        Clears the visible text box content only.
+        Clear the visible text box content only.
         """
         self.textbox.configure(state="normal")
         self.textbox.delete("1.0", "end")
@@ -74,26 +86,26 @@ class LogBoxWidget(ctk.CTkFrame):
 
     def reload(self) -> None:
         """
-        Reloads the visible content from the current logger state.
+        Reload the visible content from the current logger state.
         """
         self.clear()
         self._load_existing_records()
 
     def set_autoscroll(self, enabled: bool) -> None:
         """
-        Enables or disables automatic scrolling.
+        Enable or disable automatic scrolling.
         """
         self._autoscroll = enabled
 
     def get_autoscroll(self) -> bool:
         """
-        Returns the current auto-scroll setting.
+        Return the current auto-scroll setting.
         """
         return self._autoscroll
 
     def destroy(self) -> None:
         """
-        Unsubscribes from the logger before destroying the widget.
+        Unsubscribe from the logger before destroying the view.
         """
         Logger.unsubscribe(self.print)
         super().destroy()

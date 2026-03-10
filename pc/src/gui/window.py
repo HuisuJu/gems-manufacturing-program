@@ -1,6 +1,14 @@
+from __future__ import annotations
+
+from typing import Callable
+
 import customtkinter as ctk
 
+from settings import ModelName
 from .startup_dialog import StartupSelectionDialog
+
+
+PageFactory = Callable[[ctk.CTkFrame], ctk.CTkFrame]
 
 
 class Window(ctk.CTk):
@@ -11,33 +19,33 @@ class Window(ctk.CTk):
         1. Create hidden root window.
         2. Show startup selection dialog.
         3. If confirmed, initialize tabs/pages.
-        4. Apply startup selection to pages.
-        5. Show main window.
+        4. Show main window.
+
+    Notes:
+        - The startup dialog is responsible for storing MODEL_NAME into the
+          global settings module.
+        - Page instances are exposed through self.pages.
     """
 
-    def __init__(self, page_list: list[tuple[type[ctk.CTkFrame], str]]):
+    def __init__(self, page_factories: list[tuple[PageFactory, str]]):
         super().__init__()
 
         self.title("Hyundai HT GEMS Factory Provisioning Tool")
-        self.selected_models: list[str] = []
-        self.selected_model: str = ""
+        self.selected_model_name: ModelName | None = None
         self.pages: dict[str, ctk.CTkFrame] = {}
 
         self.withdraw()
 
-        selected_mode = self._show_startup_selection_dialog()
-        if not selected_mode:
+        selected_model_name = self._show_startup_selection_dialog()
+        if selected_model_name is None:
             return
 
-        self.selected_models = [selected_mode]
-        self.selected_model = selected_mode
+        self.selected_model_name = selected_model_name
 
-        self._initialize_main_layout(page_list)
-        self._apply_startup_selection_to_pages()
-
+        self._initialize_main_layout(page_factories)
         self.deiconify()
 
-    def _show_startup_selection_dialog(self) -> str:
+    def _show_startup_selection_dialog(self) -> ModelName | None:
         """
         Show the startup selection dialog before building the main UI.
         """
@@ -46,7 +54,7 @@ class Window(ctk.CTk):
 
     def _initialize_main_layout(
         self,
-        page_list: list[tuple[type[ctk.CTkFrame], str]],
+        page_factories: list[tuple[PageFactory, str]],
     ) -> None:
         """
         Build the main window layout and page tabs.
@@ -65,24 +73,11 @@ class Window(ctk.CTk):
         self._tabview = ctk.CTkTabview(self)
         self._tabview.grid(row=0, column=0, padx=20, pady=(0, 20), sticky="nsew")
 
-        for page_frame, page_name in page_list:
+        for page_factory, page_name in page_factories:
             tab = self._tabview.add(page_name)
             tab.grid_rowconfigure(0, weight=1)
             tab.grid_columnconfigure(0, weight=1)
 
-            page = page_frame(tab)
+            page = page_factory(tab)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[page_name] = page
-
-    def _apply_startup_selection_to_pages(self) -> None:
-        """
-        Apply the startup model selection to page instances.
-        """
-        provisioning_page = self.pages.get("Provisioning")
-        if provisioning_page is not None:
-            selected = self.selected_model.strip().lower()
-            try:
-                if hasattr(provisioning_page, "set_target_mode"):
-                    provisioning_page.set_target_mode(selected)
-            except Exception:
-                pass

@@ -1,19 +1,19 @@
+from __future__ import annotations
+
 import customtkinter as ctk
+
+from settings import ModelName, SettingsItem, settings as app_settings
 
 
 class StartupSelectionDialog(ctk.CTkToplevel):
     """
     Modal dialog shown before the main application pages are initialized.
 
-    The dialog asks the user to choose one target mode:
+    The dialog asks the user to choose one target model:
         - doorlock
         - thermostat
         - emulator
     """
-
-    MODE_DOORLOCK = "doorlock"
-    MODE_THERMOSTAT = "thermostat"
-    MODE_EMULATOR = "emulator"
 
     def __init__(self, master: ctk.CTk):
         super().__init__(master)
@@ -23,12 +23,12 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.grab_set()
 
-        self.selected_mode: str = ""
+        self.selected_model_name: ModelName | None = None
         self.was_confirmed: bool = False
 
         self.grid_columnconfigure(0, weight=1)
 
-        self._mode_var = ctk.StringVar(value="")
+        self._model_var = ctk.StringVar(value="")
 
         title_label = ctk.CTkLabel(
             self,
@@ -39,7 +39,7 @@ class StartupSelectionDialog(ctk.CTkToplevel):
 
         subtitle_label = ctk.CTkLabel(
             self,
-            text="Choose one target mode to continue.",
+            text="Choose one target model to continue.",
             font=ctk.CTkFont(size=12),
             text_color="gray70",
         )
@@ -52,24 +52,24 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         self._doorlock_radio = ctk.CTkRadioButton(
             options_frame,
             text="Doorlock",
-            variable=self._mode_var,
-            value=self.MODE_DOORLOCK,
+            variable=self._model_var,
+            value=ModelName.DOORLOCK.value,
         )
         self._doorlock_radio.grid(row=0, column=0, padx=0, pady=(0, 8), sticky="w")
 
         self._thermostat_radio = ctk.CTkRadioButton(
             options_frame,
             text="Thermostat",
-            variable=self._mode_var,
-            value=self.MODE_THERMOSTAT,
+            variable=self._model_var,
+            value=ModelName.THERMOSTAT.value,
         )
         self._thermostat_radio.grid(row=1, column=0, padx=0, pady=(0, 8), sticky="w")
 
         self._emulator_radio = ctk.CTkRadioButton(
             options_frame,
             text="Emulator",
-            variable=self._mode_var,
-            value=self.MODE_EMULATOR,
+            variable=self._model_var,
+            value=ModelName.EMULATOR.value,
         )
         self._emulator_radio.grid(row=2, column=0, padx=0, pady=(0, 0), sticky="w")
 
@@ -92,41 +92,52 @@ class StartupSelectionDialog(ctk.CTkToplevel):
         )
         self._ok_button.grid(row=0, column=0, padx=0, pady=0)
 
-        self._mode_var.trace_add("write", lambda *_: self._update_ok_state())
+        self._model_var.trace_add("write", lambda *_: self._update_ok_state())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._show_centered()
 
-    def show_modal(self) -> str:
+    def show_modal(self) -> ModelName | None:
         """
-        Show the dialog modally and return the selected mode.
+        Show the dialog modally and return the selected model name.
+
+        Returns:
+            Selected ModelName when confirmed, otherwise None.
         """
         self.wait_window()
-        return self.selected_mode if self.was_confirmed else ""
+        return self.selected_model_name if self.was_confirmed else None
 
     def _update_ok_state(self) -> None:
-        selected_mode = self._mode_var.get()
-        self._ok_button.configure(state="normal" if selected_mode else "disabled")
-        if selected_mode:
+        selected_model = self._model_var.get()
+        self._ok_button.configure(state="normal" if selected_model else "disabled")
+        if selected_model:
             self._status_label.configure(text="")
 
     def _on_ok(self) -> None:
-        selected_mode = self._mode_var.get()
+        selected_model = self._model_var.get()
 
-        if not selected_mode:
-            self._status_label.configure(text="Select one mode.")
+        if not selected_model:
+            self._status_label.configure(text="Select one model.")
             return
 
-        self.selected_mode = selected_mode
+        try:
+            model_name = ModelName(selected_model)
+            app_settings.set(SettingsItem.MODEL_NAME, model_name)
+        except Exception as exc:
+            self._status_label.configure(text=str(exc))
+            return
+
+        self.selected_model_name = model_name
         self.was_confirmed = True
         self.grab_release()
         self.destroy()
 
     def _on_close(self) -> None:
         self.was_confirmed = False
-        self.selected_mode = ""
+        self.selected_model_name = None
         self.grab_release()
         self.destroy()
+
         if self.master is not None and self.master.winfo_exists():
             self.master.destroy()
 
