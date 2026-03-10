@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys
+
+from traceback import format_exc
+
 from pathlib import Path
 
 from typing import Any, cast
@@ -32,6 +36,25 @@ from gui.window import Window
 from gui.provisioning_frame import ProvisioningFrame
 
 from gui.setting_frame import SettingFrame
+
+
+def _write_bootstrap_log(message: str) -> None:
+    """
+    Write critical startup/runtime messages to stderr and a local file.
+    """
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+    try:
+        log_directory = Path.home() / ".gems_factory" / "logs"
+        log_directory.mkdir(parents=True, exist_ok=True)
+        log_path = log_directory / "runtime_bootstrap.log"
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"{message}\n")
+    except Exception:
+        pass
 
 
 def _build_provider_for_model(model_name: ModelName) -> FactoryDataProvider:
@@ -198,6 +221,8 @@ def _select_serial_manager_for_model(
 
 
 def main() -> None:
+    _write_bootstrap_log("[BOOT] application start")
+
     Logger.start()
     serial_manager = SerialStream()
     emulator_serial_manager = EmulatorStream()
@@ -222,7 +247,14 @@ def main() -> None:
             (SettingFrame, "Setting"),
         ]
 
-        window = Window(page_factories)
+        try:
+            window = Window(page_factories)
+        except Exception:
+            _write_bootstrap_log(
+                "[BOOT][ERROR] Window initialization failed\n"
+                f"{format_exc()}"
+            )
+            return
 
         def _on_window_close() -> None:
             try:
@@ -256,6 +288,12 @@ def main() -> None:
 
         window.mainloop()
 
+    except Exception:
+        _write_bootstrap_log(
+            "[BOOT][ERROR] Unhandled exception in main\n"
+            f"{format_exc()}"
+        )
+        raise
     finally:
         try:
             serial_manager.close()
@@ -268,6 +306,7 @@ def main() -> None:
             pass
 
         Logger.stop(drain=False)
+        _write_bootstrap_log("[BOOT] application shutdown")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 
+from traceback import format_exception
+
 from typing import Callable
 
 import tkinter as tk
@@ -125,3 +127,24 @@ class Window(ctk.CTk):
             page = page_factory(tab)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[page_name] = page
+
+    def report_callback_exception(self, exc, val, tb) -> None:
+        """
+        Handle uncaught Tk callback exceptions.
+        """
+        traceback_text = "".join(format_exception(exc, val, tb))
+        message = (
+            "Tk callback exception occurred. "
+            "UI may become unstable.\n"
+            f"{traceback_text}"
+        )
+
+        try:
+            Logger.write(LogLevel.ALERT, message)
+        except Exception:
+            pass
+
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except Exception:
+            pass
