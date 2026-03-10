@@ -178,43 +178,49 @@ def _select_serial_manager_for_model(
 
 
 def main() -> None:
-    serial_manager = SerialStream()
-    emulator_serial_manager = EmulatorStream()
+    Logger.start()
 
-    def _create_provisioning_frame(master):
+    try:
+        serial_manager = SerialStream()
+        emulator_serial_manager = EmulatorStream()
+
+        def _create_provisioning_frame(master):
+            selected_serial_manager = _select_serial_manager_for_model(
+                cast(ModelName | None, app_settings.get(SettingsItem.MODEL_NAME)),
+                serial_manager,
+                emulator_serial_manager,
+            )
+
+            return ProvisioningFrame(
+                master,
+                serial_manager=cast(SerialStream, selected_serial_manager),
+            )
+
+        page_factories = [
+            (_create_provisioning_frame, "Provisioning"),
+            (SettingFrame, "Setting"),
+        ]
+
+        window = Window(page_factories)
+
+        if window.selected_model_name is None:
+            return
+
         selected_serial_manager = _select_serial_manager_for_model(
-            cast(ModelName | None, app_settings.get(SettingsItem.MODEL_NAME)),
+            window.selected_model_name,
             serial_manager,
             emulator_serial_manager,
         )
 
-        return ProvisioningFrame(
-            master,
-            serial_manager=cast(SerialStream, selected_serial_manager),
+        _wire_provisioning(
+            window=window,
+            serial_manager=selected_serial_manager,
         )
 
-    page_factories = [
-        (_create_provisioning_frame, "Provisioning"),
-        (SettingFrame, "Setting"),
-    ]
+        window.mainloop()
 
-    window = Window(page_factories)
-
-    if window.selected_model_name is None:
-        return
-
-    selected_serial_manager = _select_serial_manager_for_model(
-        window.selected_model_name,
-        serial_manager,
-        emulator_serial_manager,
-    )
-
-    _wire_provisioning(
-        window=window,
-        serial_manager=selected_serial_manager,
-    )
-
-    window.mainloop()
+    finally:
+        Logger.stop()
 
 
 if __name__ == "__main__":

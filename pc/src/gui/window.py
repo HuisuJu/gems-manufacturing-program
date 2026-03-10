@@ -6,6 +6,8 @@ from typing import Callable
 
 import customtkinter as ctk
 
+from logger import Logger, LogLevel
+
 from settings import ModelName
 
 from .startup_dialog import StartupSelectionDialog
@@ -68,16 +70,32 @@ class Window(ctk.CTk):
         if sys.platform.startswith("win"):
             try:
                 self.state("zoomed")
-            except Exception:
-                pass
+            except Exception as exc:
+                Logger.write(
+                    LogLevel.ALERT,
+                    "Windows 창 최대화 설정에 실패했습니다. "
+                    "기본 창 크기로 계속 진행합니다. "
+                    f"({type(exc).__name__}: {exc})",
+                )
         else:
             try:
                 self.wm_attributes("-zoomed", True)
-            except Exception:
+            except Exception as exc:
+                Logger.write(
+                    LogLevel.ALERT,
+                    "창 최대화 속성(wm_attributes) 적용에 실패했습니다. "
+                    "대체 경로로 재시도합니다. "
+                    f"({type(exc).__name__}: {exc})",
+                )
                 try:
                     self.attributes("-zoomed", True)
-                except Exception:
-                    pass
+                except Exception as fallback_exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "창 최대화 대체 설정(attributes)도 실패했습니다. "
+                        "기본 창 크기로 계속 진행합니다. "
+                        f"({type(fallback_exc).__name__}: {fallback_exc})",
+                    )
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)

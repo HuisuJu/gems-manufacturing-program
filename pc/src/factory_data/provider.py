@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from logger import Logger, LogLevel
+
 from .retriever import Retriever
 
 
@@ -432,8 +434,15 @@ class FactoryDataProvider:
         for retriever in retrievers:
             try:
                 retriever.report(is_success=False)
-            except Exception:
-                pass
+            except Exception as exc:
+                Logger.write(
+                    LogLevel.ALERT,
+                    "Factory data 롤백(report=False) 중 오류가 발생했습니다. "
+                    "일부 자원 상태가 동기화되지 않았을 수 있습니다. "
+                    "retriever="
+                    f"{getattr(retriever, 'name', type(retriever).__name__)} "
+                    f"({type(exc).__name__}: {exc})",
+                )
 
     def _require_schema_directory(self) -> Path:
         """

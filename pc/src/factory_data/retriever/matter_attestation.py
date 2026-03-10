@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 from typing import Any, AbstractSet, Mapping
 
+from logger import Logger, LogLevel
+
 from matter.attestation_store import (
     CdStore,
     DacCredentialPoolStore,
@@ -137,8 +139,13 @@ class MatterAttestationDataRetriever(Retriever):
             if dac_material is not None:
                 try:
                     self._dac_store.report(is_success=False)
-                except Exception:
-                    pass
+                except Exception as rollback_exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "DAC 자원 롤백(report=False) 중 오류가 발생했습니다. "
+                        "다음 시도 전 DAC 풀 상태를 확인해 주세요. "
+                        f"({type(rollback_exc).__name__}: {rollback_exc})",
+                    )
             raise
 
     def report(self, is_success: bool) -> None:

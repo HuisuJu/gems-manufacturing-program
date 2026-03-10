@@ -239,7 +239,13 @@ class EmulatorDispatcher(ProvisionDispatcher):
                         value,
                         validate=True,
                     ).hex().upper()
-                except Exception:
+                except Exception as exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "에뮬레이터 로그 포맷 변환 중 오류가 발생했습니다. "
+                        "해당 필드는 원본 문자열로 표시됩니다. "
+                        f"field={key} ({type(exc).__name__}: {exc})",
+                    )
                     converted[key] = value
                 continue
 

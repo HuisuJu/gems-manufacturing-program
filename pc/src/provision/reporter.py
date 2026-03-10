@@ -17,6 +17,8 @@ from pathlib import Path
 
 from typing import Any, NamedTuple, Optional
 
+from logger import Logger, LogLevel
+
 from settings import SettingsItem, settings as app_settings
 
 
@@ -222,7 +224,13 @@ class ProvisionReporter:
                         value,
                         validate=True,
                     ).hex().upper()
-                except Exception:
+                except Exception as exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "리포트 injected_data 변환 중 오류가 발생했습니다. "
+                        "해당 필드는 원본 문자열로 저장됩니다. "
+                        f"field={key} ({type(exc).__name__}: {exc})",
+                    )
                     converted[key] = value
                 continue
 

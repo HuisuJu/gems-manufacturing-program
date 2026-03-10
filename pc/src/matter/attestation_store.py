@@ -10,6 +10,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from logger import Logger, LogLevel
+
 from settings import SettingsItem, settings as app_settings
 
 
@@ -177,9 +179,15 @@ class DacCredentialPoolStore:
                     cert_path=cert_path,
                     key_path=key_path,
                 )
-            except Exception:
+            except Exception as exc:
                 item["status"] = self.STATUS_ERROR
                 self._save_metadata(metadata)
+                Logger.write(
+                    LogLevel.ALERT,
+                    "DAC 인증서/키 로딩에 실패하여 해당 항목을 ERROR로 표시했습니다. "
+                    "파일 형식 또는 페어 구성을 확인해 주세요. "
+                    f"base={base_name} ({type(exc).__name__}: {exc})",
+                )
                 continue
 
             self._leased_material = material
