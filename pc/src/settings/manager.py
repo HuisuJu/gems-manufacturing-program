@@ -24,6 +24,7 @@ class ModelName(str, Enum):
 
     DOORLOCK = "doorlock"
     THERMOSTAT = "thermostat"
+    EMULATOR = "emulator"
 
 
 class SettingsItem(str, Enum):

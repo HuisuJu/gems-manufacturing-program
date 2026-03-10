@@ -1,9 +1,8 @@
 """
 Provision result reporter.
 
-This module writes human-readable provisioning result files for later manual
-inspection. Sensitive provisioning payload data must not be written to the
-report output.
+This module writes provisioning result files and keeps the full injected
+factory data payload in the report output for now.
 """
 
 from __future__ import annotations
@@ -13,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from settings import SettingsItem, settings as app_settings
 
 
 class ProvisionReporterError(Exception):
@@ -24,13 +25,11 @@ class ProvisionReporterError(Exception):
 @dataclass(frozen=True, slots=True)
 class ProvisionReportRecord:
     """
-    Human-readable provisioning result record.
+    Provisioning result record.
 
     Attributes:
         index:
-            Runtime-local provider handle used for this provisioning attempt.
-            This value may be None when provisioning failed before a provider
-            handle was issued.
+            Runtime-local provisioning handle or identifier.
         success:
             Final provisioning result.
         message:
@@ -41,8 +40,10 @@ class ProvisionReportRecord:
             UTC timestamp when provisioning started.
         finished_at:
             UTC timestamp when provisioning finished.
+        injected_data:
+            Full factory data payload used for the provisioning attempt.
         details:
-            Optional non-sensitive diagnostic details.
+            Optional diagnostic details.
     """
 
     index: Optional[int]
@@ -51,6 +52,7 @@ class ProvisionReportRecord:
     dispatcher_name: str
     started_at: str
     finished_at: str
+    injected_data: dict[str, Any]
     details: Optional[dict[str, Any]] = None
 
 
@@ -58,60 +60,23 @@ class ProvisionReporter:
     """
     Write provisioning result files into a target directory.
 
-    Report files are intended for human inspection, especially when a
-    provisioning attempt fails. The reporter must never persist the full
-    provisioning payload because it may contain sensitive values.
-
-    This class is implemented as a singleton so that all GUI and application
-    components share the same report output directory configuration.
+    The report output path is driven by the global settings module. When the
+    report file path setting is not configured, a default report directory is
+    used next to the downloaded program location.
     """
 
-    DEFAULT_REPORT_DIR_NAME = "provision_reports"
+    DEFAULT_REPORT_DIR_NAME = "report"
 
-    _instance: Optional["ProvisionReporter"] = None
+    def __init__(self) -> None:
+        """
+        Initialize the reporter and subscribe to settings changes.
+        """
+        self._report_dir = self._build_default_report_dir()
 
-    def __new__(cls, report_dir: str | Path | None = None) -> "ProvisionReporter":
-        """
-        Return the singleton instance.
-        """
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+        app_settings.subscribe(SettingsItem.REPORT_FILE_PATH, self._on_setting_changed)
 
-    def __init__(self, report_dir: str | Path | None = None) -> None:
-        """
-        Initialize the singleton reporter.
-
-        Args:
-            report_dir:
-                Directory where report files will be written. If None, a default
-                "provision_reports" directory under the current working
-                directory is used.
-        """
-        if getattr(self, "_initialized", False):
-            if report_dir is not None:
-                self.set_report_dir(report_dir)
-            return
-
-        if report_dir is None:
-            self._report_dir = Path.cwd() / self.DEFAULT_REPORT_DIR_NAME
-        else:
-            self._report_dir = Path(report_dir).expanduser().resolve()
-
-        self._initialized = True
-
-    def set_report_dir(self, report_dir: str | Path) -> None:
-        """
-        Set the target directory used for future report files.
-        """
-        self._report_dir = Path(report_dir).expanduser().resolve()
-
-    def reset_report_dir_to_default(self) -> None:
-        """
-        Reset the report output directory to the default location.
-        """
-        self._report_dir = Path.cwd() / self.DEFAULT_REPORT_DIR_NAME
+        current_value = app_settings.get(SettingsItem.REPORT_FILE_PATH)
+        self._apply_report_file_path(current_value)
 
     def get_report_dir(self) -> Path:
         """
@@ -150,6 +115,40 @@ class ProvisionReporter:
                 "Failed to write the provisioning result report file."
             ) from exc
 
+    def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
+        """
+        Apply report path changes from settings.
+        """
+        if item != SettingsItem.REPORT_FILE_PATH:
+            return
+
+        self._apply_report_file_path(value)
+
+    def _apply_report_file_path(self, value: object | None) -> None:
+        """
+        Apply the report file path value received from settings.
+
+        When no explicit report file path is configured, the default report
+        directory is used.
+        """
+        if value is None:
+            self._report_dir = self._build_default_report_dir()
+            return
+
+        if not isinstance(value, Path):
+            raise ProvisionReporterError("The report file path setting is invalid.")
+
+        self._report_dir = value.parent
+
+    def _build_default_report_dir(self) -> Path:
+        """
+        Build the default report directory.
+
+        The default location is a "report" directory under the current working
+        directory, which is expected to be the program root directory.
+        """
+        return Path.cwd() / self.DEFAULT_REPORT_DIR_NAME
+
     def _build_report_file_path(self, record: ProvisionReportRecord) -> Path:
         """
         Build the output file path for the given report record.
@@ -166,8 +165,6 @@ class ProvisionReporter:
     ) -> dict[str, Any]:
         """
         Build the JSON document to be written.
-
-        Only non-sensitive summary information is included.
         """
         document: dict[str, Any] = {
             "version": 1,
@@ -178,6 +175,7 @@ class ProvisionReporter:
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "written_at": self._build_iso_utc_now(),
+            "injected_data": record.injected_data,
         }
 
         if record.details:
