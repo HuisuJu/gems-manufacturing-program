@@ -103,6 +103,7 @@ class ProvisionManager:
         view: View,
         reporter: ProvisionReporter | None = None,
         provider_ready_checker: Callable[[], bool] | None = None,
+        success_data_publisher: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """
         Initialize the provision manager.
@@ -119,12 +120,16 @@ class ProvisionManager:
             provider_ready_checker:
                 Optional callback that returns whether provider-side
                 prerequisites are currently satisfied.
+            success_data_publisher:
+                Optional callback invoked after one successful dispatch.
+                Receives the pulled factory data for UI side-effects.
         """
         self._provider = provider
         self._dispatcher = dispatcher
         self._view = view
         self._reporter = reporter if reporter is not None else ProvisionReporter()
         self._provider_ready_checker = provider_ready_checker
+        self._success_data_publisher = success_data_publisher
 
         self._state = _ManagerState.IDLE
         self._dispatcher_ready = self._dispatcher.is_ready()
@@ -405,9 +410,27 @@ class ProvisionManager:
             )
 
         if dispatch_result.success:
+            self._publish_success_data(factory_data)
             self._render_success()
         else:
             self._render_fail()
+
+    def _publish_success_data(self, factory_data: dict[str, Any]) -> None:
+        """
+        Publish successful factory data to optional UI callback.
+        """
+        publisher = self._success_data_publisher
+        if publisher is None:
+            return
+
+        try:
+            publisher(factory_data)
+        except Exception as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "성공 결과 후처리 중 오류가 발생했습니다. "
+                f"QR 표시 데이터 전달 실패: {type(exc).__name__}: {exc}",
+            )
 
     def _on_dispatcher_ready_changed(self, is_ready: bool) -> None:
         """

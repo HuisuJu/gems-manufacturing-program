@@ -130,12 +130,32 @@ def _wire_provisioning(
         )
         reporter = cast(Any, ProvisionReporter)()
 
+        def _publish_qr_from_factory_data(factory_data: dict[str, Any]) -> None:
+            payload = factory_data.get("onboarding_payload")
+            if not isinstance(payload, str):
+                return
+
+            manual_code_value = factory_data.get("onboarding_manual_code")
+            manual_code = (
+                manual_code_value if isinstance(manual_code_value, str) else None
+            )
+
+            provisioning_frame.after(
+                0,
+                lambda: provisioning_frame.show_qr_code(
+                    payload=payload,
+                    manual_code=manual_code,
+                    auto_show=True,
+                ),
+            )
+
         provision_manager = cast(Any, ProvisionManager)(
             provider=provider,
             dispatcher=dispatcher,
             view=provisioning_frame.provisioning_view,
             reporter=reporter,
             provider_ready_checker=_is_provider_prerequisite_ready,
+            success_data_publisher=_publish_qr_from_factory_data,
         )
     except Exception as exc:
         Logger.write(
