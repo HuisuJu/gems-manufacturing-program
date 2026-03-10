@@ -179,10 +179,11 @@ def _select_serial_manager_for_model(
 
 def main() -> None:
     Logger.start()
+    serial_manager = SerialStream()
+    emulator_serial_manager = EmulatorStream()
+    window: Window | None = None
 
     try:
-        serial_manager = SerialStream()
-        emulator_serial_manager = EmulatorStream()
 
         def _create_provisioning_frame(master):
             selected_serial_manager = _select_serial_manager_for_model(
@@ -203,6 +204,22 @@ def main() -> None:
 
         window = Window(page_factories)
 
+        def _on_window_close() -> None:
+            try:
+                serial_manager.close()
+            except Exception:
+                pass
+
+            try:
+                emulator_serial_manager.close()
+            except Exception:
+                pass
+
+            if window is not None and window.winfo_exists():
+                window.destroy()
+
+        window.protocol("WM_DELETE_WINDOW", _on_window_close)
+
         if window.selected_model_name is None:
             return
 
@@ -220,7 +237,17 @@ def main() -> None:
         window.mainloop()
 
     finally:
-        Logger.stop()
+        try:
+            serial_manager.close()
+        except Exception:
+            pass
+
+        try:
+            emulator_serial_manager.close()
+        except Exception:
+            pass
+
+        Logger.stop(drain=False)
 
 
 if __name__ == "__main__":

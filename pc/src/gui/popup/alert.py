@@ -202,24 +202,33 @@ class AlertManager:
         if cls._root is None:
             return
 
-        if request.level == "info":
-            messagebox.showinfo(
+        try:
+            if not bool(cls._root.winfo_exists()):
+                return
+        except Exception:
+            return
+
+        try:
+            if request.level == "info":
+                messagebox.showinfo(
+                    title=request.title,
+                    message=request.message,
+                    parent=cls._root,
+                )
+                return
+
+            if request.level == "warning":
+                messagebox.showwarning(
+                    title=request.title,
+                    message=request.message,
+                    parent=cls._root,
+                )
+                return
+
+            messagebox.showerror(
                 title=request.title,
                 message=request.message,
                 parent=cls._root,
             )
+        except tk.TclError:
             return
-
-        if request.level == "warning":
-            messagebox.showwarning(
-                title=request.title,
-                message=request.message,
-                parent=cls._root,
-            )
-            return
-
-        messagebox.showerror(
-            title=request.title,
-            message=request.message,
-            parent=cls._root,
-        )

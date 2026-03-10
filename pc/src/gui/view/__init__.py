@@ -23,6 +23,8 @@ from .provisioning import (
 	WorkerIndicatorState,
 )
 
+from .qr_code import QrCodeView
+
 from .serial import SerialView
 
 __all__ = [
@@ -35,6 +37,7 @@ __all__ = [
 	'WorkerIndicatorState',
 	'LogBoxView',
 	'LogSettingsView',
+	'QrCodeView',
 	'AttestationPathResolverError',
 	'AttestationPathResolverConfigurationError',
 	'DacCredentialPoolEmptyError',

@@ -333,13 +333,13 @@ class ProvisionManager:
         if pending.provider_report_required:
             try:
                 self._provider.report(pending.success)
-                except Exception as exc:
-                    Logger.write(
-                        LogLevel.ALERT,
-                        "Factory data 사용 결과 저장(report) 중 오류가 발생했습니다. "
-                        "현재 작업은 종료 처리되며 다음 작업을 위해 설정/저장소 상태를 확인해 주세요. "
-                        f"({type(exc).__name__}: {exc})",
-                    )
+            except Exception as exc:
+                Logger.write(
+                    LogLevel.ALERT,
+                    "Factory data 사용 결과 저장(report) 중 오류가 발생했습니다. "
+                    "현재 작업은 종료 처리되며 다음 작업을 위해 설정/저장소 상태를 확인해 주세요. "
+                    f"({type(exc).__name__}: {exc})",
+                )
                 with self._lock:
                     self._pending = None
                     self._recompute_idle_like_state_locked()
@@ -360,13 +360,13 @@ class ProvisionManager:
                     details=pending.details,
                 )
             )
-            except ProvisionReporterError as exc:
-                Logger.write(
-                    LogLevel.ALERT,
-                    "프로비저닝 결과 리포트 파일 저장에 실패했습니다. "
-                    "결과는 화면에 반영되었지만 파일 이력은 남지 않을 수 있습니다. "
-                    f"({type(exc).__name__}: {exc})",
-                )
+        except ProvisionReporterError as exc:
+            Logger.write(
+                LogLevel.ALERT,
+                "프로비저닝 결과 리포트 파일 저장에 실패했습니다. "
+                "결과는 화면에 반영되었지만 파일 이력은 남지 않을 수 있습니다. "
+                f"({type(exc).__name__}: {exc})",
+            )
 
         with self._lock:
             self._pending = None

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import webbrowser
-
 import customtkinter as ctk
 
 from logger import Logger, LogLevel
@@ -12,6 +10,7 @@ from .view import (
     LogBoxView,
     LogSettingsView,
     ProvisioningView,
+    QrCodeView,
     SerialView,
 )
 
@@ -31,7 +30,6 @@ class ProvisioningFrame(ctk.CTkFrame):
         self._outer_margin = 20
         self._card_gap = 12
         self._serial_manager = serial_manager
-        self._qr_code_url: str = ""
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
@@ -70,15 +68,38 @@ class ProvisioningFrame(ctk.CTkFrame):
             pady=(0, self._card_gap),
         )
         self._provision_result_widget.grid_columnconfigure(0, weight=1)
+        self._provision_result_widget.grid_rowconfigure(0, weight=0)
         self._provision_result_widget.grid_rowconfigure(1, weight=1)
 
-        self._see_qr_button = ctk.CTkButton(
+        self._provision_result_label = ctk.CTkLabel(
             self._provision_result_widget,
-            text="See QR code",
-            command=self._on_see_qr_code,
-            height=34,
+            text="Provisioning result summary",
+            anchor="w",
+            justify="left",
         )
-        self._see_qr_button.grid(row=1, column=0, padx=16, pady=(30, 14), sticky="ew")
+        self._provision_result_label.grid(
+            row=0,
+            column=0,
+            padx=16,
+            pady=(24, 8),
+            sticky="ew",
+        )
+
+        self._provision_result_status_label = ctk.CTkLabel(
+            self._provision_result_widget,
+            text="No provisioning result is available yet.",
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+            justify="left",
+            wraplength=220,
+        )
+        self._provision_result_status_label.grid(
+            row=1,
+            column=0,
+            padx=16,
+            pady=(0, 12),
+            sticky="ew",
+        )
 
         self._target_widget = self._create_titled_card(
             self._left_2x2_panel,
@@ -164,6 +185,8 @@ class ProvisioningFrame(ctk.CTkFrame):
             sticky="nsew",
         )
 
+        self.qr_code_view = QrCodeView(self)
+
         self._serial_manager.subscribe_event(self._on_serial_event)
 
         self.after(0, self._refresh_target_status)
@@ -174,11 +197,51 @@ class ProvisioningFrame(ctk.CTkFrame):
         """
         self._refresh_target_status()
 
-    def set_qr_code_url(self, url: str) -> None:
+    def set_provision_result_summary(self, text: str) -> None:
         """
-        Set the QR code URL opened by the result button.
+        Update the provision result summary text shown in the result card.
         """
-        self._qr_code_url = str(url).strip()
+        self._provision_result_status_label.configure(text=text)
+
+    def show_qr_code(
+        self,
+        payload: str,
+        manual_code: str | None = None,
+        *,
+        auto_show: bool = True,
+        title: str = "Matter QR Code",
+    ) -> None:
+        """
+        Store and optionally show the latest QR code result.
+        """
+        self.qr_code_view.set_qr_code(
+            payload=payload,
+            manual_code=manual_code,
+            auto_show=auto_show,
+            title=title,
+        )
+
+        summary = "QR code is available."
+        if manual_code:
+            summary = f"QR code is available.\nManual pairing code: {manual_code}"
+
+        self.set_provision_result_summary(summary)
+
+    def clear_qr_code(self) -> None:
+        """
+        Clear the stored QR code result.
+        """
+        self.qr_code_view.clear_qr_code()
+        self.set_provision_result_summary("No provisioning result is available yet.")
+
+    def show_last_qr_code(self) -> bool:
+        """
+        Show the latest QR code popup.
+
+        Returns:
+            True if shown, otherwise False.
+        """
+        return self.qr_code_view.show_last_qr_code()
 
     def _refresh_target_status(self) -> None:
         model_name = app_settings.get(SettingsItem.MODEL_NAME)
@@ -222,26 +285,6 @@ class ProvisioningFrame(ctk.CTkFrame):
         title_label.place(relx=0.5, y=10, anchor="center")
         title_label.lift()
         return body
-
-    def _on_see_qr_code(self) -> None:
-        if not self._qr_code_url:
-            Logger.write(
-                LogLevel.PROGRESS,
-                "[USER_EVENT] See QR code clicked (URL is not configured yet)",
-            )
-            return
-
-        try:
-            webbrowser.open(self._qr_code_url)
-            Logger.write(
-                LogLevel.PROGRESS,
-                f"[USER_EVENT] Opened QR code URL: {self._qr_code_url}",
-            )
-        except Exception as exc:
-            Logger.write(
-                LogLevel.WARNING,
-                f"Failed to open QR code URL ({type(exc).__name__}: {exc})",
-            )
 
     def _on_left_panel_resize(self, event) -> None:
         panel_width = max(int(event.width), 1)
