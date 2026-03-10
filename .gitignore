@@ -2,3 +2,4 @@
 __pycache__/
 build/
 dist/
+example/factory-data/dac/metadata.json
