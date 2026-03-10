@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any, cast
 
 from logger import Logger, LogLevel
@@ -10,7 +12,18 @@ from stream import SerialStream, Stream
 
 from emulator import EmulatorDispatcher, EmulatorStream
 
+from thermostat import ThermostatDispatcher
+
 from factory_data import FactoryDataProvider
+
+from factory_data.retriever import (
+    DeviceIdentityRetriever,
+    ManufacturingDataRetriever,
+    MatterAttestationDataRetriever,
+    MatterOnboardingDataRetriever,
+)
+
+from matter.attestation_store import CdStore, DacCredentialPoolStore, PaiCertStore
 
 from provision import ProvisionManager, ProvisionReporter
 
@@ -28,18 +41,50 @@ def _build_provider_for_model(model_name: ModelName) -> FactoryDataProvider:
     This function is intentionally small here, because the exact provider
     wiring depends on the current retriever/schema configuration.
     """
-    # Adjust this constructor if your current FactoryDataProvider requires
-    # explicit schema/retriever injection.
-    return FactoryDataProvider()
+    schema_directory = Path(__file__).resolve().parents[2] / "schema"
+
+    provider = FactoryDataProvider(
+        schema_directory=schema_directory,
+        model_name=model_name.value,
+    )
+
+    provider.add_retriever(DeviceIdentityRetriever())
+    provider.add_retriever(ManufacturingDataRetriever())
+    provider.add_retriever(
+        MatterAttestationDataRetriever(
+            dac_store=DacCredentialPoolStore(),
+            pai_store=PaiCertStore(),
+            cd_store=CdStore(),
+        )
+    )
+    provider.add_retriever(MatterOnboardingDataRetriever())
+
+    return provider
 
 
-def _build_dispatcher_for_model(model_name: ModelName):
+def _is_provider_prerequisite_ready() -> bool:
+    """
+    Return whether provider prerequisites are configured.
+
+    START must remain disabled until all attestation input paths are set.
+    """
+    required_items = (
+        SettingsItem.DAC_POOL_DIR_PATH,
+        SettingsItem.PAI_FILE_PATH,
+        SettingsItem.CD_FILE_PATH,
+    )
+
+    return all(app_settings.get(item) is not None for item in required_items)
+
+
+def _build_dispatcher_for_model(
+    model_name: ModelName,
+    serial_manager: Stream,
+):
     """
     Build the dispatcher for the selected model.
 
-    Emulator is supported here directly.
-    Doorlock / Thermostat should be replaced with their concrete dispatchers
-    when those implementations are ready.
+    Emulator and Thermostat are supported directly.
     """
     if model_name == ModelName.EMULATOR:
         return EmulatorDispatcher(
@@ -47,6 +92,9 @@ def _build_dispatcher_for_model(model_name: ModelName):
             dispatch_delay_sec=1.0,
             default_success=True,
         )
+
+    if model_name == ModelName.THERMOSTAT:
+        return ThermostatDispatcher(stream=serial_manager)
 
     raise NotImplementedError(
         f"Dispatcher for model '{model_name.value}' is not implemented yet."
@@ -76,7 +124,10 @@ def _wire_provisioning(
 
     try:
         provider = _build_provider_for_model(model_name)
-        dispatcher = _build_dispatcher_for_model(model_name)
+        dispatcher = _build_dispatcher_for_model(
+            model_name=model_name,
+            serial_manager=serial_manager,
+        )
         reporter = cast(Any, ProvisionReporter)()
 
         provision_manager = cast(Any, ProvisionManager)(
@@ -84,6 +135,7 @@ def _wire_provisioning(
             dispatcher=dispatcher,
             view=provisioning_frame.provisioning_view,
             reporter=reporter,
+            provider_ready_checker=_is_provider_prerequisite_ready,
         )
     except Exception as exc:
         Logger.write(
@@ -112,9 +164,7 @@ def _wire_provisioning(
         on_provisioning_user_event
     )
 
-    # Note:
-    # Current ProvisionManager does not expose a public activate()/run() method
-    # for initial READY/IDLE rendering. Add one later if needed.
+    provision_manager.activate()
 
 
 def _select_serial_manager_for_model(

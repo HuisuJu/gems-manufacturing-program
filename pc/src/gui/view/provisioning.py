@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+
 from enum import Enum
-from typing import Callable, Optional
+
+from typing import Callable, NamedTuple, Optional
 
 import customtkinter as ctk
 
@@ -23,8 +24,7 @@ class WorkerIndicatorState(str, Enum):
     FAIL = "FAIL"
 
 
-@dataclass(slots=True)
-class ProvisioningUserEvent:
+class ProvisioningUserEvent(NamedTuple):
     """
     User action emitted by the provisioning view.
     """
@@ -86,7 +86,13 @@ class ProvisioningView(View):
             font=ctk.CTkFont(size=48, weight="bold"),
             anchor="center",
         )
-        self.worker_indicator.grid(row=0, column=0, padx=20, pady=(24, 8), sticky="ew")
+        self.worker_indicator.grid(
+            row=0,
+            column=0,
+            padx=20,
+            pady=(24, 8),
+            sticky="ew",
+        )
 
         self.status_message_label = ctk.CTkLabel(
             self.frame,
@@ -96,7 +102,13 @@ class ProvisioningView(View):
             justify="center",
             wraplength=420,
         )
-        self.status_message_label.grid(row=1, column=0, padx=20, pady=(0, 14), sticky="ew")
+        self.status_message_label.grid(
+            row=1,
+            column=0,
+            padx=20,
+            pady=(0, 14),
+            sticky="ew",
+        )
 
         self.primary_button = ctk.CTkButton(
             self.frame,
@@ -115,7 +127,13 @@ class ProvisioningView(View):
             justify="left",
             wraplength=420,
         )
-        self.next_action_label.grid(row=3, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.next_action_label.grid(
+            row=3,
+            column=0,
+            padx=20,
+            pady=(0, 10),
+            sticky="ew",
+        )
 
         self.dispatcher_status_label = ctk.CTkLabel(
             self.frame,
@@ -124,7 +142,13 @@ class ProvisioningView(View):
             anchor="w",
             justify="left",
         )
-        self.dispatcher_status_label.grid(row=4, column=0, padx=20, pady=(0, 16), sticky="ew")
+        self.dispatcher_status_label.grid(
+            row=4,
+            column=0,
+            padx=20,
+            pady=(0, 16),
+            sticky="ew",
+        )
 
         self._event_handlers = {
             "idle": self._handle_idle,
@@ -309,4 +333,6 @@ class ProvisioningView(View):
         """
         Disable the Finish action.
         """
+        if self._current_button_text.strip().upper() != "FINISH":
+            return
         self.set_primary_button(text="Finish", enabled=False)

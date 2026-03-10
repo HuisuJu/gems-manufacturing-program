@@ -1,0 +1,43 @@
+{
+  "title": "Emulator Factory Data",
+  "required": [
+    "serial_number",
+    "manufactured_date",
+    "dac_cert",
+    "dac_public_key",
+    "dac_private_key",
+    "pai_cert",
+    "certification_declaration",
+    "spake2p_passcode",
+    "spake2p_salt",
+    "spake2p_iteration_count",
+    "spake2p_verifier",
+    "onboarding_payload"
+  ],
+  "properties": {
+    "vendor_id": {
+      "const": 4142,
+      "description": "Matter Vendor ID (0x102E)"
+    },
+
+    "product_id": {
+      "const": 8896,
+      "description": "Matter Product ID for Doorlock (0x22C0)"
+    },
+
+    "custom_flow": {
+      "const": 0,
+      "description": "Matter commissioning flow. Standard flow is 0."
+    },
+
+    "discovery_capabilities": {
+      "const": 2,
+      "description": "Matter discovery capability bitmask used for onboarding payload generation. BLE only is 2."
+    },
+
+    "spake2p_iteration_count": {
+      "const": 1000,
+      "description": "Matter SPAKE2+ iteration count"
+    }
+  }
+}

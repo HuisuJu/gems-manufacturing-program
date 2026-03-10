@@ -8,11 +8,16 @@ simulates a provisioning delay, and returns a synthetic DispatchResult.
 
 from __future__ import annotations
 
+import base64
+
 import json
+
 import time
+
 from typing import Any, Optional
 
 from logger import Logger, LogLevel
+
 from provision.dispatcher import DispatchResult, ProvisionDispatcher, ReadyListener
 
 
@@ -193,15 +198,54 @@ class EmulatorDispatcher(ProvisionDispatcher):
         """
         Convert the payload to a formatted string for logging.
         """
+        payload_for_log = self._build_payload_for_log(payload)
+
         try:
             return json.dumps(
-                payload,
+                payload_for_log,
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
             )
         except Exception:
-            return repr(payload)
+            return repr(payload_for_log)
+
+    def _build_payload_for_log(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Build a log-friendly payload representation.
+
+        Binary fields are decoded from Base64 and rendered as uppercase
+        contiguous hex strings, e.g. "308201E9...".
+        """
+        binary_base64_fields = {
+            "certification_declaration",
+            "dac_cert",
+            "dac_private_key",
+            "dac_public_key",
+            "pai_cert",
+            "spake2p_salt",
+            "spake2p_verifier",
+        }
+
+        converted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if isinstance(value, bytes):
+                converted[key] = value.hex().upper()
+                continue
+
+            if key in binary_base64_fields and isinstance(value, str):
+                try:
+                    converted[key] = base64.b64decode(
+                        value,
+                        validate=True,
+                    ).hex().upper()
+                except Exception:
+                    converted[key] = value
+                continue
+
+            converted[key] = value
+
+        return converted
 
     def _resolve_dispatch_success(self) -> bool:
         """

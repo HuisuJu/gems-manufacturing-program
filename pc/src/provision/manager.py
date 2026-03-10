@@ -10,15 +10,21 @@ named view triggers.
 from __future__ import annotations
 
 import queue
+
 import threading
-from dataclasses import dataclass
+
 from datetime import datetime, timezone
+
 from enum import Enum
-from typing import Any, Optional
+
+from typing import Any, Callable, NamedTuple, Optional
 
 from factory_data import FactoryDataProvider, FactoryDataProviderError
+
 from gui.view.base import View
+
 from .dispatcher import DispatchResult, ProvisionDispatcher
+
 from .reporter import (
     ProvisionReportRecord,
     ProvisionReporter,
@@ -55,8 +61,7 @@ class _Command(str, Enum):
     STOP = "STOP"
 
 
-@dataclass(slots=True)
-class _PendingFinalization:
+class _PendingFinalization(NamedTuple):
     """
     Completed provisioning attempt waiting for explicit finalization.
     """
@@ -76,6 +81,7 @@ class ProvisionManager:
     Provision workflow manager running in a dedicated worker thread.
 
     Public API:
+        - activate()
         - start()
         - finish()
         - stop()
@@ -94,6 +100,7 @@ class ProvisionManager:
         dispatcher: ProvisionDispatcher,
         view: View,
         reporter: ProvisionReporter | None = None,
+        provider_ready_checker: Callable[[], bool] | None = None,
     ) -> None:
         """
         Initialize the provision manager.
@@ -107,14 +114,19 @@ class ProvisionManager:
                 Provisioning view updated through trigger() calls.
             reporter:
                 Reporter used to persist provisioning results.
+            provider_ready_checker:
+                Optional callback that returns whether provider-side
+                prerequisites are currently satisfied.
         """
         self._provider = provider
         self._dispatcher = dispatcher
         self._view = view
         self._reporter = reporter if reporter is not None else ProvisionReporter()
+        self._provider_ready_checker = provider_ready_checker
 
-        self._state = _ManagerState.STOPPED
+        self._state = _ManagerState.IDLE
         self._dispatcher_ready = self._dispatcher.is_ready()
+        self._provider_ready = self._evaluate_provider_ready()
         self._pending: _PendingFinalization | None = None
 
         self._thread: threading.Thread | None = None
@@ -125,6 +137,23 @@ class ProvisionManager:
         # Dispatcher base class stores the readiness callback in this field.
         self._dispatcher._ready_listener = self._on_dispatcher_ready_changed
 
+    def activate(self) -> None:
+        """
+        Activate manager runtime and render initial state.
+
+        This method should be called once after wiring the manager and view.
+        It starts the worker thread and pushes the current READY/IDLE state to
+        the view immediately.
+        """
+        self._ensure_worker_started()
+        self._refresh_provider_ready()
+
+        with self._lock:
+            if self._state in {_ManagerState.IDLE, _ManagerState.READY}:
+                self._recompute_idle_like_state_locked()
+
+        self._render_current_state()
+
     def start(self) -> None:
         """
         Start the worker thread if needed and request one provisioning attempt.
@@ -132,6 +161,7 @@ class ProvisionManager:
         Calls outside READY are ignored silently.
         """
         self._ensure_worker_started()
+        self._refresh_provider_ready()
 
         with self._lock:
             if self._state != _ManagerState.READY:
@@ -216,6 +246,8 @@ class ProvisionManager:
             try:
                 command = self._command_queue.get(timeout=0.2)
             except queue.Empty:
+                if self._refresh_provider_ready():
+                    self._render_current_state()
                 continue
 
             if command == _Command.START:
@@ -384,7 +416,47 @@ class ProvisionManager:
         """
         Recompute READY/IDLE state while holding the manager lock.
         """
-        self._state = _ManagerState.READY if self._dispatcher_ready else _ManagerState.IDLE
+        self._state = (
+            _ManagerState.READY
+            if self._dispatcher_ready and self._provider_ready
+            else _ManagerState.IDLE
+        )
+
+    def _evaluate_provider_ready(self) -> bool:
+        """
+        Evaluate provider-side readiness.
+        """
+        checker = self._provider_ready_checker
+        if checker is None:
+            return True
+
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+
+    def _refresh_provider_ready(self) -> bool:
+        """
+        Refresh provider readiness and update idle-like state if needed.
+
+        Returns:
+            True when readiness changed, otherwise False.
+        """
+        provider_ready = self._evaluate_provider_ready()
+
+        with self._lock:
+            changed = provider_ready != self._provider_ready
+            self._provider_ready = provider_ready
+
+            if changed and self._state not in {
+                _ManagerState.PROGRESS,
+                _ManagerState.WAITING_FINISH_SUCCESS,
+                _ManagerState.WAITING_FINISH_FAIL,
+                _ManagerState.STOPPED,
+            }:
+                self._recompute_idle_like_state_locked()
+
+        return changed
 
     def _render_current_state(self) -> None:
         """

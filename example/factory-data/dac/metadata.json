@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "entries": {
+    "LGE_Matter_IoT_Doorlock_260227_00001": {
+      "status": "consumed"
+    },
+    "LGE_Matter_IoT_Doorlock_260227_00002": {
+      "status": "consumed"
+    },
+    "LGE_Matter_IoT_Doorlock_260227_00003": {
+      "status": "ready"
+    },
+    "LGE_Matter_IoT_Doorlock_260227_00004": {
+      "status": "ready"
+    },
+    "LGE_Matter_IoT_Doorlock_260227_00005": {
+      "status": "ready"
+    },
+    "LGE_Matter_IoT_Doorlock_260227_00006": {
+      "status": "ready"
+    }
+  }
+}

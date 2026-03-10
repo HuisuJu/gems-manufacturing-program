@@ -7,11 +7,15 @@ factory data payload in the report output for now.
 
 from __future__ import annotations
 
+import base64
+
 import json
-from dataclasses import dataclass
+
 from datetime import datetime, timezone
+
 from pathlib import Path
-from typing import Any, Optional
+
+from typing import Any, NamedTuple, Optional
 
 from settings import SettingsItem, settings as app_settings
 
@@ -22,8 +26,7 @@ class ProvisionReporterError(Exception):
     """
 
 
-@dataclass(frozen=True, slots=True)
-class ProvisionReportRecord:
+class ProvisionReportRecord(NamedTuple):
     """
     Provisioning result record.
 
@@ -73,7 +76,10 @@ class ProvisionReporter:
         """
         self._report_dir = self._build_default_report_dir()
 
-        app_settings.subscribe(SettingsItem.REPORT_FILE_PATH, self._on_setting_changed)
+        app_settings.subscribe(
+            SettingsItem.REPORT_FILE_PATH,
+            self._on_setting_changed,
+        )
 
         current_value = app_settings.get(SettingsItem.REPORT_FILE_PATH)
         self._apply_report_file_path(current_value)
@@ -175,13 +181,54 @@ class ProvisionReporter:
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "written_at": self._build_iso_utc_now(),
-            "injected_data": record.injected_data,
+            "injected_data": self._build_injected_data_document(
+                record.injected_data
+            ),
         }
 
         if record.details:
             document["details"] = record.details
 
         return document
+
+    def _build_injected_data_document(
+        self,
+        injected_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Build report-friendly injected_data.
+
+        Binary fields are rendered as uppercase contiguous hex strings.
+        """
+        binary_base64_fields = {
+            "certification_declaration",
+            "dac_cert",
+            "dac_private_key",
+            "dac_public_key",
+            "pai_cert",
+            "spake2p_salt",
+            "spake2p_verifier",
+        }
+
+        converted: dict[str, Any] = {}
+        for key, value in injected_data.items():
+            if isinstance(value, bytes):
+                converted[key] = value.hex().upper()
+                continue
+
+            if key in binary_base64_fields and isinstance(value, str):
+                try:
+                    converted[key] = base64.b64decode(
+                        value,
+                        validate=True,
+                    ).hex().upper()
+                except Exception:
+                    converted[key] = value
+                continue
+
+            converted[key] = value
+
+        return converted
 
     def _build_file_timestamp(self) -> str:
         """
