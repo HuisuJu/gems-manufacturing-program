@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
+
 from typing import Callable
 
 import customtkinter as ctk
 
 from settings import ModelName
+
 from .startup_dialog import StartupSelectionDialog
 
 
@@ -43,7 +46,10 @@ class Window(ctk.CTk):
         self.selected_model_name = selected_model_name
 
         self._initialize_main_layout(page_factories)
+
         self.deiconify()
+        self.lift()
+        self.focus_force()
 
     def _show_startup_selection_dialog(self) -> ModelName | None:
         """
@@ -59,13 +65,19 @@ class Window(ctk.CTk):
         """
         Build the main window layout and page tabs.
         """
-        try:
-            self.wm_attributes("-zoomed", True)
-        except Exception:
+        if sys.platform.startswith("win"):
             try:
-                self.attributes("-zoomed", True)
+                self.state("zoomed")
             except Exception:
                 pass
+        else:
+            try:
+                self.wm_attributes("-zoomed", True)
+            except Exception:
+                try:
+                    self.attributes("-zoomed", True)
+                except Exception:
+                    pass
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
