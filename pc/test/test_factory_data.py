@@ -77,8 +77,9 @@ def _write_bytes(path: Path, data: bytes) -> None:
 
 
 def _make_schema_dir(tmp_path: Path) -> Path:
-    schema_dir = tmp_path / "schema"
-    schema_dir.mkdir()
+    schema_root = tmp_path / "schema"
+    schema_dir = schema_root / "json"
+    schema_dir.mkdir(parents=True)
 
     base_schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -132,7 +133,7 @@ def _make_schema_dir(tmp_path: Path) -> Path:
 
     _write_text(schema_dir / "base.schema.json", json.dumps(base_schema, indent=2))
     _write_text(schema_dir / "doorlock.schema.json", json.dumps(doorlock_schema, indent=2))
-    return schema_dir
+    return schema_root
 
 
 @pytest.fixture

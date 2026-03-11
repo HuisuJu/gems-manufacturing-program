@@ -57,6 +57,7 @@ class FactoryDataProvider:
     """
 
     BASE_SCHEMA_FILENAME = "base.schema.json"
+    SCHEMA_JSON_SUBDIRECTORY = "json"
 
     def __init__(
         self,
@@ -129,7 +130,35 @@ class FactoryDataProvider:
                 "The schema path is not a directory."
             )
 
-        self._schema_directory = path
+        self._schema_directory = self._resolve_schema_file_directory(path)
+
+    def _resolve_schema_file_directory(self, schema_root: Path) -> Path:
+        """
+        Resolve the actual directory that contains schema JSON files.
+
+        Accepts either:
+        - a directory that directly contains base.schema.json
+        - a parent schema directory that contains a json/ subdirectory with
+          base.schema.json
+
+        Args:
+            schema_root: User-provided schema root directory.
+
+        Returns:
+            Directory path containing base.schema.json.
+        """
+        base_schema_in_root = schema_root / self.BASE_SCHEMA_FILENAME
+        if base_schema_in_root.is_file():
+            return schema_root
+
+        json_subdirectory = schema_root / self.SCHEMA_JSON_SUBDIRECTORY
+        base_schema_in_json_subdirectory = (
+            json_subdirectory / self.BASE_SCHEMA_FILENAME
+        )
+        if base_schema_in_json_subdirectory.is_file():
+            return json_subdirectory
+
+        return schema_root
 
     def set_model_name(self, model_name: str) -> None:
         """

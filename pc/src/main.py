@@ -64,7 +64,7 @@ def _build_provider_for_model(model_name: ModelName) -> FactoryDataProvider:
     This function is intentionally small here, because the exact provider
     wiring depends on the current retriever/schema configuration.
     """
-    schema_directory = Path(__file__).resolve().parents[2] / "schema"
+    schema_directory = Path(__file__).resolve().parents[2] / "schema" / "json"
 
     provider = FactoryDataProvider(
         schema_directory=schema_directory,

@@ -3,4 +3,4 @@ __pycache__/
 build/
 report/
 dist/
-example/factory-data/dac/metadata.json
+examples/factory-data/dac/metadata.json
