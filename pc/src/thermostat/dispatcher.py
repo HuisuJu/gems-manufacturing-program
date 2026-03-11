@@ -4,7 +4,7 @@ This dispatcher sends thermostat factory data records over a connected raw
 stream.
 
 Wire format for each transmitted item:
-    b"se_injection " + record + b"\\x0A"
+    b"se " + record + b"\\x0A"
 
 Where record is:
     - 1 byte : item index
@@ -86,7 +86,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
     _SPAKE2P_L_SIZE = 65
     _SPAKE2P_VERIFIER_SIZE = _SPAKE2P_W0_SIZE + _SPAKE2P_L_SIZE
 
-    _COMMAND_PREFIX = b"se_injection "
+    _COMMAND_PREFIX = b"se "
     _COMMAND_SUFFIX = b"\x0A"
 
     _ITEMS: tuple[_DispatchItem, ...] = (
@@ -455,7 +455,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
         Build the final wire frame.
 
         Wire format:
-            b"se_injection " + record + b"\\x0A"
+            b"se " + record + b"\\x0A"
         """
         return self._COMMAND_PREFIX + record + self._COMMAND_SUFFIX
 
@@ -490,7 +490,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
     def _handle_rx_chunk(self, chunk: bytes) -> None:
         """
-        Append a received chunk and print every complete newline-terminated line.
+        Append a received chunk and log every complete newline-terminated line.
         """
         completed_lines: list[bytes] = []
 
@@ -512,4 +512,4 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
         for line in completed_lines:
             text = line.decode("utf-8", errors="replace")
-            print(text)
+            Logger.write(LogLevel.PROGRESS, text)
