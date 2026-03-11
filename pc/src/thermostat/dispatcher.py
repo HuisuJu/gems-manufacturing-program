@@ -3,7 +3,10 @@
 This dispatcher sends thermostat factory data records over a connected raw
 stream.
 
-Record format:
+Wire format for each transmitted item:
+    b"se_injection " + record + b"\\x0A"
+
+Where record is:
     - 1 byte : item index
     - 2 bytes: payload length (little-endian)
     - N bytes: payload
@@ -37,11 +40,15 @@ complete newline-terminated line received from the device.
 from __future__ import annotations
 
 import base64
+
 import threading
+
 from typing import Any, Callable, NamedTuple
 
 from logger.manager import Logger, LogLevel
+
 from provision.dispatcher import DispatchResult, ProvisionDispatcher
+
 from stream import Stream
 
 
@@ -78,6 +85,9 @@ class ThermostatDispatcher(ProvisionDispatcher):
     _SPAKE2P_W0_SIZE = 32
     _SPAKE2P_L_SIZE = 65
     _SPAKE2P_VERIFIER_SIZE = _SPAKE2P_W0_SIZE + _SPAKE2P_L_SIZE
+
+    _COMMAND_PREFIX = b"se_injection "
+    _COMMAND_SUFFIX = b"\x0A"
 
     _ITEMS: tuple[_DispatchItem, ...] = (
         _DispatchItem(
@@ -264,7 +274,9 @@ class ThermostatDispatcher(ProvisionDispatcher):
         sent_indices: list[int] = []
 
         for item, record in encoded_records:
-            if not self._stream.write(record):
+            frame = self._build_command_frame(record)
+
+            if not self._stream.write(frame):
                 return DispatchResult(
                     success=False,
                     message=(
@@ -280,6 +292,13 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 )
 
             sent_indices.append(item.index)
+
+            Logger.write(
+                LogLevel.PROGRESS,
+                f"Thermostat dispatch sent: idx={item.index}, "
+                f"payload_len={len(record) - 3}, "
+                f"frame_len={len(frame)}",
+            )
 
         return DispatchResult(
             success=True,
@@ -430,6 +449,15 @@ class ThermostatDispatcher(ProvisionDispatcher):
             + len(payload).to_bytes(2, byteorder="little", signed=False)
             + payload
         )
+
+    def _build_command_frame(self, record: bytes) -> bytes:
+        """
+        Build the final wire frame.
+
+        Wire format:
+            b"se_injection " + record + b"\\x0A"
+        """
+        return self._COMMAND_PREFIX + record + self._COMMAND_SUFFIX
 
     def _reader_loop(self) -> None:
         """
