@@ -255,14 +255,14 @@ class SerialView(View):
         self.frame.grid_columnconfigure(1, weight=0)
         self.frame.grid_columnconfigure(2, weight=0)
 
-        self.port_menu = SerialPortOptionMenu(self.frame, width=220)
+        self.port_menu = SerialPortOptionMenu(self.frame, width=130)
         self.port_menu.grid(row=0, column=0, padx=(15, 6), pady=(20, 6), sticky="ew")
 
         self.refresh_btn = SerialRefreshButton(
             self.frame,
             self.port_menu,
             self._get_available_ports,
-            width=86,
+            width=64,
             height=28,
         )
         self.refresh_btn.grid(row=0, column=1, padx=(6, 6), pady=(20, 6), sticky="ew")
@@ -287,7 +287,7 @@ class SerialView(View):
             self.port_menu,
             self.status_indicator,
             self.is_connected,
-            width=100,
+            width=76,
             height=28,
         )
         self.connect_btn.grid(row=0, column=2, padx=(6, 15), pady=(20, 6), sticky="ew")

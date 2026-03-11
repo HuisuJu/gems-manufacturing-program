@@ -53,20 +53,7 @@ class Window(ctk.CTk):
 
         self._initialize_main_layout(page_factories)
 
-        try:
-            self.deiconify()
-            self.lift()
-        except tk.TclError as exc:
-            Logger.write(
-                LogLevel.ALERT,
-                "메인 창 표시(deiconify/lift) 중 오류가 발생했습니다. "
-                f"({type(exc).__name__}: {exc})",
-            )
-
-        try:
-            self.focus_force()
-        except tk.TclError:
-            pass
+        self._show_main_window_safely()
 
     def _show_startup_selection_dialog(self) -> ModelName | None:
         """
@@ -82,36 +69,9 @@ class Window(ctk.CTk):
         """
         Build the main window layout and page tabs.
         """
-        if sys.platform.startswith("win"):
-            try:
-                self.state("zoomed")
-            except Exception as exc:
-                Logger.write(
-                    LogLevel.ALERT,
-                    "Windows 창 최대화 설정에 실패했습니다. "
-                    "기본 창 크기로 계속 진행합니다. "
-                    f"({type(exc).__name__}: {exc})",
-                )
-                self.geometry("1280x800")
-        else:
-            try:
-                self.wm_attributes("-zoomed", True)
-            except Exception as exc:
-                Logger.write(
-                    LogLevel.ALERT,
-                    "창 최대화 속성(wm_attributes) 적용에 실패했습니다. "
-                    "대체 경로로 재시도합니다. "
-                    f"({type(exc).__name__}: {exc})",
-                )
-                try:
-                    self.attributes("-zoomed", True)
-                except Exception as fallback_exc:
-                    Logger.write(
-                        LogLevel.ALERT,
-                        "창 최대화 대체 설정(attributes)도 실패했습니다. "
-                        "기본 창 크기로 계속 진행합니다. "
-                        f"({type(fallback_exc).__name__}: {fallback_exc})",
-                    )
+        # Keep deterministic fallback size first. Maximize is applied after the
+        # window becomes visible to avoid platform-specific show timing issues.
+        self.geometry("1280x800")
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -127,6 +87,100 @@ class Window(ctk.CTk):
             page = page_factory(tab)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[page_name] = page
+
+    def _show_main_window_safely(self) -> None:
+        """
+        Show the main window with retries to avoid hidden-window states.
+
+        On Windows, withdrawn + modal + immediate maximize can leave the root
+        hidden while Tk mainloop is still running.
+        """
+        for _ in range(3):
+            try:
+                self.deiconify()
+                self.lift()
+                self.update_idletasks()
+            except tk.TclError as exc:
+                Logger.write(
+                    LogLevel.ALERT,
+                    "Failed to show main window (deiconify/lift). "
+                    f"({type(exc).__name__}: {exc})",
+                )
+                continue
+
+            if self.winfo_viewable():
+                break
+
+        self._apply_initial_window_state()
+
+        try:
+            self.focus_force()
+        except tk.TclError:
+            pass
+
+    def _apply_initial_window_state(self) -> None:
+        """
+        Apply maximize behavior after the root window is visible.
+
+        Tk window-state application timing can vary per platform/window manager,
+        so we apply maximize now and retry shortly after mapping.
+        """
+        self._maximize_window(log_failure=True)
+        self.after(80, self._maximize_window)
+        self.after(250, self._maximize_window)
+
+    def _maximize_window(self, log_failure: bool = False) -> None:
+        """
+        Try multiple maximize strategies with a screen-size fallback.
+        """
+        if sys.platform.startswith("win"):
+            attempts = [
+                ("state(zoomed)", lambda: self.state("zoomed")),
+            ]
+        elif sys.platform == "darwin":
+            attempts = [
+                ("state(zoomed)", lambda: self.state("zoomed")),
+            ]
+        else:
+            attempts = [
+                (
+                    "wm_attributes(-zoomed)",
+                    lambda: self.wm_attributes("-zoomed", True),
+                ),
+                ("attributes(-zoomed)", lambda: self.attributes("-zoomed", True)),
+                ("state(zoomed)", lambda: self.state("zoomed")),
+            ]
+
+        last_error: Exception | None = None
+        maximize_call_succeeded = False
+        for _, operation in attempts:
+            try:
+                operation()
+                maximize_call_succeeded = True
+            except Exception as exc:
+                last_error = exc
+
+        try:
+            self.update_idletasks()
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            width = max(self.winfo_width(), 1)
+            height = max(self.winfo_height(), 1)
+
+            # If maximize state was ignored by the WM, fallback to screen-sized
+            # geometry so the app still opens effectively maximized.
+            if width < int(screen_width * 0.9) or height < int(screen_height * 0.9):
+                self.geometry(f"{screen_width}x{screen_height}+0+0")
+                maximize_call_succeeded = True
+        except Exception as exc:
+            last_error = exc
+
+        if log_failure and not maximize_call_succeeded and last_error is not None:
+            Logger.write(
+                LogLevel.ALERT,
+                "Failed to apply maximized window state. "
+                f"({type(last_error).__name__}: {last_error})",
+            )
 
     def report_callback_exception(self, exc, val, tb) -> None:
         """

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tkinter as tk
+
 import customtkinter as ctk
 
 from logger import Logger, LogRecord
@@ -38,6 +40,9 @@ class LogBoxView(View):
 
         self.textbox.configure(yscrollcommand=self.scrollbar.set)
         self.textbox.configure(state="disabled")
+        self._copy_menu = tk.Menu(self, tearoff=0)
+        self._copy_menu.add_command(label="Copy", command=self._copy_selected_text)
+        self._bind_copy_shortcuts()
 
         self._event_handlers = {
             "clear": self.clear,
@@ -102,6 +107,85 @@ class LogBoxView(View):
         Return the current auto-scroll setting.
         """
         return self._autoscroll
+
+    def _bind_copy_shortcuts(self) -> None:
+        """
+        Bind copy shortcuts on both wrapper and internal text widget.
+        """
+        widgets = [self.textbox]
+        internal_textbox = getattr(self.textbox, "_textbox", None)
+        if internal_textbox is not None:
+            widgets.append(internal_textbox)
+
+        for widget in widgets:
+            widget.bind("<Control-c>", self._on_copy, add="+")
+            widget.bind("<Control-C>", self._on_copy, add="+")
+            widget.bind("<Command-c>", self._on_copy, add="+")
+            widget.bind("<Command-C>", self._on_copy, add="+")
+            widget.bind("<Control-Insert>", self._on_copy, add="+")
+            widget.bind("<Button-3>", self._show_copy_menu, add="+")
+            widget.bind("<Button-2>", self._show_copy_menu, add="+")
+
+    def _show_copy_menu(self, event) -> str:
+        """
+        Show right-click context menu with copy action.
+        """
+        selected_text = self._get_selected_text()
+        self._copy_menu.entryconfigure(
+            "Copy",
+            state="normal" if selected_text else "disabled",
+        )
+
+        try:
+            self._copy_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._copy_menu.grab_release()
+
+        return "break"
+
+    def _on_copy(self, _event) -> str:
+        """
+        Copy the selected log text to clipboard when Ctrl+C is pressed.
+        """
+        self._copy_selected_text()
+        return "break"
+
+    def _copy_selected_text(self) -> None:
+        """
+        Copy current selection into clipboard.
+        """
+        selected_text = self._get_selected_text()
+        if not selected_text:
+            return
+
+        root = self.winfo_toplevel()
+        root.clipboard_clear()
+        root.clipboard_append(selected_text)
+        # Flush clipboard ownership to the OS so copied text survives app exit.
+        root.update()
+
+    def _get_selected_text(self) -> str:
+        """
+        Return selected text from wrapper/internal text widgets.
+        """
+        selected_text = ""
+
+        for widget in (self.textbox, getattr(self.textbox, "_textbox", None)):
+            if widget is None:
+                continue
+
+            try:
+                selected_text = widget.selection_get()
+            except Exception:
+                try:
+                    selected_text = widget.get("sel.first", "sel.last")
+                except Exception:
+                    continue
+
+            if selected_text:
+                break
+
+        return selected_text
 
     def destroy(self) -> None:
         """

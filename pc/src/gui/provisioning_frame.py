@@ -29,6 +29,8 @@ class ProvisioningFrame(ctk.CTkFrame):
 
         self._outer_margin = 20
         self._card_gap = 12
+        self._left_panel_width = 820
+        self._left_panel_height = 340
         self._serial_manager = serial_manager
 
         self.grid_columnconfigure(0, weight=0)
@@ -37,6 +39,11 @@ class ProvisioningFrame(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         self._left_2x2_panel = ctk.CTkFrame(self, fg_color="transparent")
+        self._left_2x2_panel.configure(
+            width=self._left_panel_width,
+            height=self._left_panel_height,
+        )
+        self._left_2x2_panel.grid_propagate(False)
         self._left_2x2_panel.grid(
             row=0,
             column=0,
@@ -288,7 +295,10 @@ class ProvisioningFrame(ctk.CTkFrame):
 
     def _on_left_panel_resize(self, event) -> None:
         panel_width = max(int(event.width), 1)
-        cell_size = max(120, min((panel_width - self._card_gap) // 2, 220))
+        panel_height = max(int(event.height), 1)
+        width_based_size = (panel_width - self._card_gap) // 2
+        height_based_size = (panel_height - self._card_gap) // 2
+        cell_size = max(110, min(width_based_size, height_based_size, 145))
         self._left_2x2_panel.grid_columnconfigure(0, minsize=cell_size)
         self._left_2x2_panel.grid_columnconfigure(1, minsize=cell_size)
         self._left_2x2_panel.grid_rowconfigure(0, minsize=cell_size)
