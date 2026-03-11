@@ -3,23 +3,30 @@
 This dispatcher sends thermostat factory data records over a connected raw
 stream.
 
-Each record uses the thermostat-side temporary format:
-
+Thermostat transfer record format:
     - 1 byte: item index
-    - 2 bytes: payload length
+    - 2 bytes: payload length (little-endian)
     - N bytes: payload
 
-Dispatcher readiness is defined only by the underlying stream connection
-state. If the stream is connected, the dispatcher is considered ready.
+Input factory data is expected to follow the provisioning JSON structure used
+by the factory data provider. In practice, injected values may be represented
+as:
+    - hex strings for binary blobs
+    - integers for numeric fields
+    - a combined SPAKE2+ verifier field that must be split into W0 and L
+
+Additional behavior:
+    - A background reader thread continuously reads from the stream.
+    - Any newline-terminated device output is printed immediately.
 """
 
 from __future__ import annotations
 
-
+import threading
 from typing import Any, Callable, NamedTuple
 
 from stream import Stream
-
+from logger.manager import Logger, LogLevel
 from provision.dispatcher import DispatchResult, ProvisionDispatcher
 
 
@@ -43,7 +50,7 @@ class _DispatchItem(NamedTuple):
     index: int
     key_candidates: tuple[str, ...]
     required: bool
-    value_kind: str
+    kind: str
     description: str
 
 
@@ -52,40 +59,42 @@ class ThermostatDispatcher(ProvisionDispatcher):
     Dispatcher implementation for the thermostat provisioning format.
     """
 
+    _READ_TIMEOUT_SEC = 0.1
+
     _ITEMS: tuple[_DispatchItem, ...] = (
         _DispatchItem(
             index=0,
             key_candidates=("cd", "certification_declaration"),
             required=True,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="Certification Declaration",
         ),
         _DispatchItem(
             index=1,
             key_candidates=("pai_cert", "pai_certificate"),
             required=True,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="PAI certificate",
         ),
         _DispatchItem(
             index=2,
             key_candidates=("dac_cert", "dac_certificate"),
             required=True,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="DAC certificate",
         ),
         _DispatchItem(
             index=3,
             key_candidates=("dac_private_key", "dac_priv", "dac_key"),
             required=False,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="DAC private key",
         ),
         _DispatchItem(
             index=4,
             key_candidates=("dac_public_key", "dac_pub"),
             required=False,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="DAC public key",
         ),
         _DispatchItem(
@@ -96,35 +105,35 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 "spake2p_iteration_count",
             ),
             required=True,
-            value_kind="u32",
+            kind="u32",
             description="SPAKE2+ iteration count",
         ),
         _DispatchItem(
             index=6,
             key_candidates=("passcode", "setup_passcode", "spake2p_passcode"),
             required=True,
-            value_kind="u32",
+            kind="u32",
             description="SPAKE2+ passcode",
         ),
         _DispatchItem(
             index=7,
             key_candidates=("salt", "spake2p_salt"),
             required=True,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="SPAKE2+ salt",
         ),
         _DispatchItem(
             index=8,
-            key_candidates=("verifier_w0", "spake2p_verifier_w0"),
+            key_candidates=("verifier_w0",),
             required=False,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="SPAKE2+ verifier W0",
         ),
         _DispatchItem(
             index=9,
-            key_candidates=("verifier_l", "spake2p_verifier_l"),
+            key_candidates=("verifier_l",),
             required=False,
-            value_kind="bytes",
+            kind="hex_bytes",
             description="SPAKE2+ verifier L",
         ),
     )
@@ -146,13 +155,28 @@ class ThermostatDispatcher(ProvisionDispatcher):
         super().__init__(ready_listener=ready_listener)
         self._stream = stream
         self._stream.subscribe_event(self._on_stream_event)
+
+        self._stop_event = threading.Event()
+        self._rx_lock = threading.Lock()
+        self._rx_buffer = bytearray()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            name="ThermostatDispatcherReader",
+            daemon=True,
+        )
+        self._reader_thread.start()
+
         self.notify_ready_changed(self.is_ready())
 
     def destroy(self) -> None:
         """
-        Release owned subscriptions.
+        Release owned subscriptions and stop the background reader thread.
         """
+        self._stop_event.set()
         self._stream.unsubscribe_event(self._on_stream_event)
+
+        if self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
 
     def is_ready(self) -> bool:
         """
@@ -169,7 +193,9 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
         Args:
             factory_data:
-                Complete factory data dictionary.
+                Complete factory data dictionary. The dispatcher accepts either
+                the injected_data section itself or a wrapper dictionary that
+                contains an injected_data field.
 
         Returns:
             DispatchResult describing the outcome.
@@ -186,11 +212,14 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 details={"reason": "stream_not_connected"},
             )
 
+        payload_source = self._extract_payload_source(factory_data)
+        self._expand_combined_verifier(payload_source)
+
         encoded_records: list[tuple[_DispatchItem, bytes]] = []
         skipped_optional: list[str] = []
 
         for item in self._ITEMS:
-            raw_value = self._find_value(factory_data, item.key_candidates)
+            raw_value = self._find_value(payload_source, item.key_candidates)
 
             if raw_value is None:
                 if item.required:
@@ -254,6 +283,53 @@ class ThermostatDispatcher(ProvisionDispatcher):
         elif event_name == "disconnected":
             self.notify_ready_changed(False)
 
+    def _extract_payload_source(self, factory_data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Return the actual injected payload dictionary.
+
+        The dispatcher accepts either:
+            - the injected_data dictionary itself
+            - a wrapper dictionary containing 'injected_data'
+        """
+        injected = factory_data.get("injected_data")
+        if isinstance(injected, dict):
+            return dict(injected)
+
+        return dict(factory_data)
+
+    def _expand_combined_verifier(self, payload_source: dict[str, Any]) -> None:
+        """
+        Expand a combined SPAKE2+ verifier field into W0 and L if needed.
+
+        Expected layout:
+            - W0: first 32 bytes
+            - L : remaining bytes
+
+        This matches the common P-256 representation where W0 is 32 bytes and
+        L is an uncompressed EC point of 65 bytes.
+        """
+        has_w0 = self._find_value(payload_source, ("verifier_w0", "spake2p_verifier_w0"))
+        has_l = self._find_value(payload_source, ("verifier_l", "spake2p_verifier_l"))
+
+        if has_w0 is not None or has_l is not None:
+            return
+
+        combined = self._find_value(payload_source, ("spake2p_verifier", "verifier"))
+        if combined is None:
+            return
+
+        verifier = self._decode_hex_bytes(combined, "SPAKE2+ verifier")
+        if len(verifier) < 33:
+            raise ThermostatDispatcherConfigurationError(
+                "The value for 'SPAKE2+ verifier' is too short."
+            )
+
+        w0 = verifier[:32]
+        l_value = verifier[32:]
+
+        payload_source["verifier_w0"] = w0.hex().upper()
+        payload_source["verifier_l"] = l_value.hex().upper()
+
     def _find_value(
         self,
         factory_data: dict[str, Any],
@@ -271,19 +347,19 @@ class ThermostatDispatcher(ProvisionDispatcher):
         """
         Encode one thermostat item payload.
         """
-        if item.value_kind == "bytes":
-            return self._encode_bytes(value, item.description)
+        if item.kind == "hex_bytes":
+            return self._decode_hex_bytes(value, item.description)
 
-        if item.value_kind == "u32":
+        if item.kind == "u32":
             return self._encode_u32(value, item.description)
 
         raise ThermostatDispatcherConfigurationError(
-            f"Unsupported thermostat item encoding kind: {item.value_kind}"
+            f"Unsupported thermostat item encoding kind: {item.kind}"
         )
 
-    def _encode_bytes(self, value: Any, field_name: str) -> bytes:
+    def _decode_hex_bytes(self, value: Any, field_name: str) -> bytes:
         """
-        Normalize one bytes-like value.
+        Decode one hex-string field into raw bytes.
 
         Accepted forms:
             - bytes
@@ -301,12 +377,14 @@ class ThermostatDispatcher(ProvisionDispatcher):
             return bytes(value)
 
         if isinstance(value, str):
-            normalized = value.strip().lower().replace(" ", "").replace("_", "")
-            if normalized.startswith("0x"):
+            normalized = value.strip().replace(" ", "").replace("_", "")
+            if normalized.startswith(("0x", "0X")):
                 normalized = normalized[2:]
 
-            if not normalized:
-                return b""
+            if len(normalized) % 2 != 0:
+                raise ThermostatDispatcherConfigurationError(
+                    f"The value for '{field_name}' is not valid hex."
+                )
 
             try:
                 return bytes.fromhex(normalized)
@@ -341,7 +419,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
         Layout:
             - index: 1 byte
-            - length: 2 bytes
+            - length: 2 bytes, little-endian
             - payload: N bytes
         """
         if index < 0 or index > 0xFF:
@@ -359,3 +437,57 @@ class ThermostatDispatcher(ProvisionDispatcher):
             + len(payload).to_bytes(2, byteorder="little", signed=False)
             + payload
         )
+
+    def _reader_loop(self) -> None:
+        """
+        Continuously read raw data from the stream and print complete lines.
+
+        Partial data is buffered until a newline is received.
+        """
+        while not self._stop_event.is_set():
+            try:
+                chunk = self._stream.read(timeout=self._READ_TIMEOUT_SEC)
+            except Exception as exc:
+                Logger.write(
+                    LogLevel.WARNING,
+                    f"Thermostat dispatcher read failed: {type(exc).__name__}: {exc}",
+                )
+                continue
+
+            if not chunk:
+                continue
+
+            if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                Logger.write(
+                    LogLevel.WARNING,
+                    "Thermostat dispatcher received non-bytes stream data.",
+                )
+                continue
+
+            self._handle_rx_chunk(bytes(chunk))
+
+    def _handle_rx_chunk(self, chunk: bytes) -> None:
+        """
+        Append a received chunk and print every complete newline-terminated line.
+        """
+        completed_lines: list[bytes] = []
+
+        with self._rx_lock:
+            self._rx_buffer.extend(chunk)
+
+            while True:
+                pos = self._rx_buffer.find(b"\n")
+                if pos < 0:
+                    break
+
+                line = bytes(self._rx_buffer[:pos])
+                del self._rx_buffer[: pos + 1]
+
+                if line.endswith(b"\r"):
+                    line = line[:-1]
+
+                completed_lines.append(line)
+
+        for line in completed_lines:
+            text = line.decode("utf-8", errors="replace")
+            print(text)
