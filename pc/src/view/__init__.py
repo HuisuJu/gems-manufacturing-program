@@ -4,8 +4,8 @@ __all__ = ['Window', 'ProvisioningFrame', 'SettingFrame']
 
 _EXPORT_MAP = {
     'Window': '.window',
-    'ProvisioningFrame': '.provisioning_frame',
-    'SettingFrame': '.setting_frame',
+    'ProvisioningFrame': '.frame',
+    'SettingFrame': '.frame',
 }
 
 

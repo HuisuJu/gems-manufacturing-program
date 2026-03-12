@@ -9,4 +9,7 @@ def program_metadata_path() -> Path:
     else:
         root_path = Path(sys.argv[0]).resolve().parent
 
-    return root_path / 'metadata'
+    metadata_path = root_path / 'metadata'
+    metadata_path.mkdir(parents=True, exist_ok=True)
+    
+    return metadata_path

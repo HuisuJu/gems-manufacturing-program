@@ -27,15 +27,11 @@ from factory_data.retriever import (
     MatterOnboardingDataRetriever,
 )
 
-from storage import CdStore, DacCredentialPoolStore, PaiCertStore
-
 from provision import ProvisionManager, ProvisionReporter
 
-from gui.window import Window
+from view.frame import ProvisioningFrame
 
-from gui.provisioning_frame import ProvisioningFrame
-
-from gui.setting_frame import SettingFrame
+from view.window import Window
 
 
 def _write_bootstrap_log(message: str) -> None:
@@ -73,13 +69,7 @@ def _build_provider_for_model(model_name: ModelName) -> FactoryDataProvider:
 
     provider.add_retriever(DeviceIdentityRetriever())
     provider.add_retriever(ManufacturingDataRetriever())
-    provider.add_retriever(
-        MatterAttestationDataRetriever(
-            dac_store=DacCredentialPoolStore(),
-            pai_store=PaiCertStore(),
-            cd_store=CdStore(),
-        )
-    )
+    provider.add_retriever(MatterAttestationDataRetriever())
     provider.add_retriever(MatterOnboardingDataRetriever())
 
     return provider
@@ -230,25 +220,11 @@ def main() -> None:
 
     try:
 
-        def _create_provisioning_frame(master):
-            selected_serial_manager = _select_serial_manager_for_model(
-                cast(ModelName | None, Settings.get(SettingsItem.MODEL_NAME)),
-                serial_manager,
-                emulator_serial_manager,
-            )
-
-            return ProvisioningFrame(
-                master,
-                serial_manager=cast(SerialStream, selected_serial_manager),
-            )
-
-        page_factories = [
-            (_create_provisioning_frame, "Provisioning"),
-            (SettingFrame, "Setting"),
-        ]
-
         try:
-            window = Window(page_factories)
+            window = Window(
+                serial_manager=serial_manager,
+                emulator_serial_manager=emulator_serial_manager,
+            )
         except Exception:
             _write_bootstrap_log(
                 "[BOOT][ERROR] Window initialization failed\n"

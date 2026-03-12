@@ -6,12 +6,8 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .view.attestation_path_resolver import (
-    AttestationPathResolverConfigurationError,
-    CdPathResolver,
-    DacCredentialPoolPathResolver,
-    PaiCertPathResolver,
-)
+import storage
+
 from system import Settings, SettingsItem
 
 
@@ -30,10 +26,6 @@ class SettingFrame(ctk.CTkFrame):
 
     def __init__(self, master, **kwargs) -> None:
         super().__init__(master, **kwargs)
-
-        self._dac_pool_resolver = DacCredentialPoolPathResolver()
-        self._pai_path_resolver = PaiCertPathResolver()
-        self._cd_path_resolver = CdPathResolver()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)
@@ -227,33 +219,27 @@ class SettingFrame(ctk.CTkFrame):
 
     def _refresh_dac_pool_widget(self) -> None:
         """
-        Refresh the DAC pool directory row from the resolver state.
+        Refresh the DAC pool directory row from settings.
         """
-        directory = self._dac_pool_resolver.directory
+        directory = Settings.get(SettingsItem.DAC_POOL_DIR_PATH)
         display_text = "" if directory is None else str(directory)
         self._dac_pool_value_label.configure(text=display_text)
 
     def _refresh_pai_file_widget(self) -> None:
         """
-        Refresh the PAI certificate file row from the resolver state.
+        Refresh the PAI certificate file row from settings.
         """
-        try:
-            path = self._pai_path_resolver.get_path()
-            display_text = str(path)
-        except AttestationPathResolverConfigurationError:
-            display_text = ""
+        path = Settings.get(SettingsItem.PAI_FILE_PATH)
+        display_text = "" if path is None else str(path)
 
         self._pai_file_value_label.configure(text=display_text)
 
     def _refresh_cd_file_widget(self) -> None:
         """
-        Refresh the Certification Declaration file row from the resolver state.
+        Refresh the Certification Declaration file row from settings.
         """
-        try:
-            path = self._cd_path_resolver.get_path()
-            display_text = str(path)
-        except AttestationPathResolverConfigurationError:
-            display_text = ""
+        path = Settings.get(SettingsItem.CD_FILE_PATH)
+        display_text = "" if path is None else str(path)
 
         self._cd_file_value_label.configure(text=display_text)
 
@@ -264,7 +250,7 @@ class SettingFrame(ctk.CTkFrame):
         lines: list[str] = []
 
         try:
-            report = self._dac_pool_resolver.get_inventory_report()
+            report = storage.dac_pool_store.get_inventory_report()
             lines.append(
                 "DAC Pool: "
                 f"total={report.total}, "
@@ -275,17 +261,14 @@ class SettingFrame(ctk.CTkFrame):
         except Exception as exc:
             lines.append(f"DAC Pool: {exc}")
 
-        try:
-            pai_path = self._pai_path_resolver.get_path()
+        pai_path = Settings.get(SettingsItem.PAI_FILE_PATH)
+        if pai_path is None:
+            lines.append("PAI: not configured")
+        else:
             lines.append(f"PAI: {pai_path}")
-        except Exception as exc:
-            lines.append(f"PAI: {exc}")
 
-        try:
-            cd_path = self._cd_path_resolver.get_path()
-            lines.append(f"CD: {cd_path}")
-        except Exception as exc:
-            lines.append(f"CD: {exc}")
+        cd_path = Settings.get(SettingsItem.CD_FILE_PATH)
+        lines.append("CD: not configured" if cd_path is None else f"CD: {cd_path}")
 
         self._status_label.configure(text="\n".join(lines))
 
@@ -332,10 +315,7 @@ class SettingFrame(ctk.CTkFrame):
                 normalized_path,
                 field_label="PAI certificate file",
             )
-            Settings.set(
-                SettingsItem.PAI_FILE_PATH,
-                validated_path,
-            )
+            storage.pai_cert_store.load(validated_path)
         except Exception as exc:
             messagebox.showerror(
                 "PAI Certificate File",
@@ -361,10 +341,7 @@ class SettingFrame(ctk.CTkFrame):
                 normalized_path,
                 field_label="Certification Declaration file",
             )
-            Settings.set(
-                SettingsItem.CD_FILE_PATH,
-                validated_path,
-            )
+            storage.cd_cert_store.load(validated_path)
         except Exception as exc:
             messagebox.showerror(
                 "Certification Declaration File",
@@ -390,7 +367,7 @@ class SettingFrame(ctk.CTkFrame):
         Clear the PAI certificate file setting.
         """
         try:
-            Settings.clear(SettingsItem.PAI_FILE_PATH)
+            storage.pai_cert_store.load(None)
         except Exception as exc:
             messagebox.showerror(
                 "PAI Certificate File",
@@ -403,7 +380,7 @@ class SettingFrame(ctk.CTkFrame):
         Clear the Certification Declaration file setting.
         """
         try:
-            Settings.clear(SettingsItem.CD_FILE_PATH)
+            storage.cd_cert_store.load(None)
         except Exception as exc:
             messagebox.showerror(
                 "Certification Declaration File",

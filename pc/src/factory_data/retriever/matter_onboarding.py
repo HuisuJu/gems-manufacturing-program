@@ -89,9 +89,7 @@ class MatterOnboardingDataRetriever(Retriever):
             RetrieverError: If required schema information is missing or the
                 onboarding data cannot be generated.
         """
-        required_fields = self._get_required_fields(schema)
-        target_fields = required_fields & set(self.supported_fields)
-
+        target_fields = self.target_fields(schema)
         if not target_fields:
             return {}
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from enum import Enum
+
 from typing import Callable, NamedTuple, Optional
 
 import customtkinter as ctk
 
 from logger import Logger, LogLevel
-
-from .base import View
 
 
 class WorkerIndicatorState(str, Enum):
@@ -34,7 +33,7 @@ class ProvisioningUserEvent(NamedTuple):
 ProvisioningUserEventListener = Callable[[ProvisioningUserEvent], None]
 
 
-class ProvisioningView(View):
+class ProvisioningView(ctk.CTkFrame):
     """
     Provisioning view widget.
 
@@ -334,3 +333,9 @@ class ProvisioningView(View):
         if self._current_button_text.strip().upper() != "FINISH":
             return
         self.set_primary_button(text="Finish", enabled=False)
+
+    def trigger(self, event_name: str) -> None:
+        """Dispatch one named event."""
+        handler = self._event_handlers.get(event_name)
+        if handler is not None:
+            handler()

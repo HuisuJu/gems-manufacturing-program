@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from pathlib import Path
+
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-import qrcode
+
+from qrcode import QRCode
+
+from qrcode.constants import ERROR_CORRECT_M
+
 from PIL import Image
 
 from logger import Logger, LogLevel
 
-from .base import View
-
 
 @dataclass(frozen=True, slots=True)
+
+
 class QrCodeData:
-    """
-    Represents one QR code result.
-    """
+    """One QR code result."""
 
     payload: str
     manual_code: str | None = None
@@ -25,32 +29,30 @@ class QrCodeData:
 
 
 def _build_qr_image(payload: str) -> Image.Image:
-    """
-    Build a QR image from the provided payload.
-    """
+    """Build a QR image from payload."""
     normalized = payload.strip()
     if not normalized:
         raise ValueError("QR payload must not be empty.")
 
-    qr = qrcode.QRCode(
+    qr = QRCode(
         version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        error_correction=ERROR_CORRECT_M,
         box_size=10,
         border=4,
     )
     qr.add_data(normalized)
     qr.make(fit=True)
 
-    return qr.make_image(
+    pil_image = qr.make_image(
         fill_color="black",
         back_color="white",
-    ).convert("RGB")
+    )
+
+    return pil_image.get_image().convert("RGB")
 
 
 def _save_qr_image(payload: str, path: str | Path) -> Path:
-    """
-    Save the QR image to a PNG file.
-    """
+    """Save QR image as PNG."""
     image = _build_qr_image(payload)
 
     output = Path(path).expanduser().resolve()
@@ -61,9 +63,7 @@ def _save_qr_image(payload: str, path: str | Path) -> Path:
 
 
 class QrCodePopup(ctk.CTkToplevel):
-    """
-    Modal popup displaying one QR code result.
-    """
+    """Modal popup for one QR code result."""
 
     def __init__(self, parent, data: QrCodeData) -> None:
         super().__init__(parent)
@@ -146,18 +146,14 @@ class QrCodePopup(ctk.CTkToplevel):
         close_btn.grid(row=0, column=1, padx=(8, 0), sticky="ew")
 
     def show_modal(self) -> None:
-        """
-        Show the popup modally.
-        """
+        """Show popup as modal."""
         self.lift()
         self.focus_force()
         self.grab_set()
         self.wait_window(self)
 
     def _save_png(self) -> None:
-        """
-        Save the QR image to a file selected by the operator.
-        """
+        """Save QR image to selected file."""
         path = filedialog.asksaveasfilename(
             parent=self,
             title="Save QR Code",
@@ -184,9 +180,7 @@ class QrCodePopup(ctk.CTkToplevel):
         )
 
     def _close(self) -> None:
-        """
-        Close the popup.
-        """
+        """Close popup."""
         try:
             self.grab_release()
         except Exception:
@@ -195,15 +189,10 @@ class QrCodePopup(ctk.CTkToplevel):
         self.destroy()
 
 
-class QrCodeView(View):
-    """
-    View responsible for managing QR code result state and popup display.
-    """
+class QrCodeView(ctk.CTkFrame):
+    """State holder and popup launcher for QR codes."""
 
     def __init__(self, parent: ctk.CTkFrame, **kwargs) -> None:
-        """
-        Initialize the QR code view.
-        """
         super().__init__(parent, **kwargs)
 
         self._last_qr_code_data: QrCodeData | None = None
@@ -221,9 +210,7 @@ class QrCodeView(View):
         auto_show: bool = True,
         title: str = "Matter QR Code",
     ) -> None:
-        """
-        Store the latest QR code result and optionally show it.
-        """
+        """Store latest QR result and optionally show it."""
         normalized_payload = payload.strip()
         if not normalized_payload:
             Logger.write(LogLevel.WARNING, "QR payload is empty.")
@@ -239,24 +226,15 @@ class QrCodeView(View):
             self.show_last_qr_code()
 
     def get_last_qr_code(self) -> QrCodeData | None:
-        """
-        Return the latest QR code result.
-        """
+        """Return latest QR result."""
         return self._last_qr_code_data
 
     def clear_qr_code(self) -> None:
-        """
-        Clear the latest QR code result.
-        """
+        """Clear latest QR result."""
         self._last_qr_code_data = None
 
     def show_last_qr_code(self) -> bool:
-        """
-        Show the latest QR popup.
-
-        Returns:
-            True if shown, otherwise False.
-        """
+        """Show latest QR popup."""
         if self._last_qr_code_data is None:
             Logger.write(LogLevel.WARNING, "No QR code is available.")
             return False
@@ -273,14 +251,14 @@ class QrCodeView(View):
 
         return True
 
+    def trigger(self, event_name: str) -> None:
+        """Dispatch one named event."""
+        handler = self._event_handlers.get(event_name)
+        if handler is not None:
+            handler()
+
     def _handle_show_last(self) -> None:
-        """
-        Show the latest QR popup.
-        """
         self.show_last_qr_code()
 
     def _handle_clear(self) -> None:
-        """
-        Clear the latest QR code result.
-        """
         self.clear_qr_code()

@@ -1,16 +1,9 @@
 from __future__ import annotations
 
 import base64
+from typing import AbstractSet, Any, Mapping
 
-from typing import Any, AbstractSet, Mapping
-
-from logger import Logger, LogLevel
-
-from storage import (
-    CdStore,
-    DacCredentialPoolStore,
-    PaiCertStore,
-)
+import storage
 
 from .base import Retriever, RetrieverError
 
@@ -20,34 +13,17 @@ class MatterAttestationDataRetriever(Retriever):
     Retrieve Matter attestation factory data.
     """
 
-    _SUPPORTED_FIELDS = frozenset({
-        "dac_cert",
-        "dac_public_key",
-        "dac_private_key",
-        "pai_cert",
-        "certification_declaration",
-    })
-
-    def __init__(
-        self,
-        dac_store: DacCredentialPoolStore,
-        pai_store: PaiCertStore,
-        cd_store: CdStore,
-    ) -> None:
-        """
-        Initialize with attestation stores.
-
-        Args:
-            dac_store: DAC credential pool store.
-            pai_store: PAI certificate store.
-            cd_store: Certification Declaration store.
-        """
-        self._dac_store = dac_store
-        self._pai_store = pai_store
-        self._cd_store = cd_store
+    _SUPPORTED_FIELDS = frozenset(
+        {
+            "dac_cert",
+            "dac_public_key",
+            "dac_private_key",
+            "pai_cert",
+            "certification_declaration",
+        }
+    )
 
     @property
-
     def name(self) -> str:
         """
         Retriever name.
@@ -55,7 +31,6 @@ class MatterAttestationDataRetriever(Retriever):
         return "matter_attestation"
 
     @property
-
     def supported_fields(self) -> AbstractSet[str]:
         """
         Supported output fields.
@@ -64,82 +39,38 @@ class MatterAttestationDataRetriever(Retriever):
 
     def fetch(self, schema: Mapping[str, Any]) -> dict[str, Any]:
         """
-        Fetch requested attestation fields.
-
-        Args:
-            schema: Factory data schema represented as a Python mapping.
-
-        Returns:
-            Flat field-value mapping.
-
-        Raises:
-            RetrieverError: Fetch failed.
+        Fetch Matter attestation data for the requested schema fields.
         """
-        required_fields = self._get_required_fields(schema)
-        target_fields = required_fields & set(self.supported_fields)
-
+        target_fields = self.target_fields(schema)
         if not target_fields:
             return {}
 
         result: dict[str, Any] = {}
-
-        dac_material = None
-        needs_dac_material = bool(
-            {"dac_cert", "dac_public_key", "dac_private_key"} & target_fields
-        )
-
-        if needs_dac_material:
-            try:
-                dac_material = self._dac_store.pull()
-            except Exception as exc:
-                raise RetrieverError(
-                    "Failed to pull a DAC certificate/key pair."
-                ) from exc
+        dac_pulled = False
 
         try:
-            if "dac_cert" in target_fields:
-                if dac_material is None:
-                    raise RetrieverError(
-                        "DAC certificate material is not available."
-                    )
-                result["dac_cert"] = self._encode_bytes(dac_material.dac_cert_der)
-
-            if "dac_public_key" in target_fields:
-                if dac_material is None:
-                    raise RetrieverError("DAC public key material is not available.")
-                result["dac_public_key"] = self._encode_bytes(
-                    dac_material.dac_public_key
-                )
-
-            if "dac_private_key" in target_fields:
-                if dac_material is None:
-                    raise RetrieverError(
-                        "DAC private key material is not available."
-                    )
-                result["dac_private_key"] = self._encode_bytes(
-                    dac_material.dac_private_key
-                )
+            if {
+                "dac_cert",
+                "dac_public_key",
+                "dac_private_key",
+            } & target_fields:
+                result.update(self._fetch_dac_materials(target_fields))
+                dac_pulled = True
 
             if "pai_cert" in target_fields:
-                pai_der = self._pai_store.get()
-                result["pai_cert"] = self._encode_bytes(pai_der)
+                result.update(self._fetch_pai_cert())
 
             if "certification_declaration" in target_fields:
-                cd_der = self._cd_store.get()
-                result["certification_declaration"] = self._encode_bytes(cd_der)
+                result.update(self._fetch_cd_cert())
 
             return result
+
         except Exception:
-            if dac_material is not None:
+            if dac_pulled:
                 try:
-                    self._dac_store.report(is_success=False)
-                except Exception as rollback_exc:
-                    Logger.write(
-                        LogLevel.ALERT,
-                        "DAC rollback(report=False) failed. "
-                        "Check DAC pool state before retry. "
-                        f"({type(rollback_exc).__name__}: {rollback_exc})",
-                    )
+                    storage.dac_pool_store.report(is_success=False)
+                except Exception:
+                    pass
             raise
 
     def report(self, is_success: bool) -> None:
@@ -153,41 +84,72 @@ class MatterAttestationDataRetriever(Retriever):
             RetrieverError: Report failed.
         """
         try:
-            self._dac_store.report(is_success=is_success)
+            storage.dac_pool_store.report(is_success=is_success)
         except Exception as exc:
             raise RetrieverError(
                 "Failed to report the DAC credential pair result."
             ) from exc
 
-    def _get_required_fields(self, schema: Mapping[str, Any]) -> set[str]:
+    def _fetch_dac_materials(
+        self,
+        target_fields: AbstractSet[str],
+    ) -> dict[str, Any]:
         """
-        Return required field names from schema.
-
-        Args:
-            schema: Factory data schema represented as a Python mapping.
-
-        Returns:
-            A set of required field names.
-
-        Raises:
-            RetrieverError: Invalid schema format.
+        Fetch requested DAC-related fields from the DAC pool.
         """
-        required = schema.get("required")
-        if not isinstance(required, list):
+        try:
+            dac_material = storage.dac_pool_store.pull()
+        except Exception as exc:
             raise RetrieverError(
-                "Factory data schema is missing the top-level required field list."
-            )
+                "Failed to pull a DAC certificate/key pair."
+            ) from exc
 
-        return {field for field in required if isinstance(field, str)}
+        result: dict[str, Any] = {}
 
-    def _encode_bytes(self, value: bytes) -> str:
+        if "dac_cert" in target_fields:
+            result["dac_cert"] = self._encode(dac_material.dac_cert_der)
+
+        if "dac_public_key" in target_fields:
+            result["dac_public_key"] = self._encode(dac_material.dac_public_key)
+
+        if "dac_private_key" in target_fields:
+            result["dac_private_key"] = self._encode(dac_material.dac_private_key)
+
+        return result
+
+    def _fetch_pai_cert(self) -> dict[str, Any]:
+        """
+        Fetch the PAI certificate.
+        """
+        try:
+            pai_der = storage.pai_cert_store.get()
+        except Exception as exc:
+            raise RetrieverError(
+                "Failed to get the PAI certificate."
+            ) from exc
+
+        return {
+            "pai_cert": self._encode(pai_der),
+        }
+
+    def _fetch_cd_cert(self) -> dict[str, Any]:
+        """
+        Fetch the Certification Declaration.
+        """
+        try:
+            cd_der = storage.cd_store.get()
+        except Exception as exc:
+            raise RetrieverError(
+                "Failed to get the Certification Declaration."
+            ) from exc
+
+        return {
+            "certification_declaration": self._encode(cd_der),
+        }
+
+    @staticmethod
+    def _encode(value: bytes) -> str:
         """
         Encode bytes as Base64 ASCII.
-
-        Args:
-            value: Binary value to encode.
-
-        Returns:
-            Base64-encoded ASCII string.
         """
         return base64.b64encode(value).decode("ascii")

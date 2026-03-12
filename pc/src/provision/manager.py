@@ -17,11 +17,9 @@ from datetime import datetime, timezone
 
 from enum import Enum
 
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional, Protocol
 
 from factory_data import FactoryDataProvider, FactoryDataProviderError
-
-from gui.view.base import View
 
 from logger import Logger, LogLevel
 
@@ -38,6 +36,13 @@ class ProvisionManagerError(Exception):
     """
     Base exception for provision manager failures.
     """
+
+
+class TriggerView(Protocol):
+    """Minimal view protocol used by the provision manager."""
+
+    def trigger(self, event_name: str) -> None:
+        """Dispatch one named UI event."""
 
 
 class _ManagerState(str, Enum):
@@ -100,7 +105,7 @@ class ProvisionManager:
         self,
         provider: FactoryDataProvider,
         dispatcher: ProvisionDispatcher,
-        view: View,
+        view: TriggerView,
         reporter: ProvisionReporter | None = None,
         provider_ready_checker: Callable[[], bool] | None = None,
         success_data_publisher: Callable[[dict[str, Any]], None] | None = None,

@@ -6,11 +6,12 @@ from logger import Logger, LogLevel
 from system import Settings, SettingsItem
 from stream import SerialStream
 
-from .view import (
+from ..dialog import QrCodeView
+
+from ..widget import (
     LogBoxView,
     LogSettingsView,
     ProvisioningView,
-    QrCodeView,
     SerialView,
 )
 

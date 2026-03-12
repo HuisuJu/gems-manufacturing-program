@@ -7,11 +7,10 @@ import customtkinter as ctk
 
 from logger import Logger, LogLevel, LogPresenterType, LogSaver
 
-from .base import View
 from .log_box import LogBoxView
 
 
-class LogSettingsView(View):
+class LogSettingsView(ctk.CTkFrame):
     """
     Provide log-related controls such as clear, save, auto-clear-on-finish,
     and maximum visible log level.

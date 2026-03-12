@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import threading
+
 from typing import Callable
 
 import customtkinter as ctk
 
 from stream import Stream
-
-from .base import View
 
 
 class SerialFrame(ctk.CTkFrame):
@@ -223,7 +222,7 @@ class SerialConnectionButton(ctk.CTkButton):
         super().destroy()
 
 
-class SerialView(View):
+class SerialView(ctk.CTkFrame):
     """
     Stream connection view.
 
@@ -265,7 +264,13 @@ class SerialView(View):
             width=64,
             height=28,
         )
-        self.refresh_btn.grid(row=0, column=1, padx=(6, 6), pady=(20, 6), sticky="ew")
+        self.refresh_btn.grid(
+            row=0,
+            column=1,
+            padx=(6, 6),
+            pady=(20, 6),
+            sticky="ew",
+        )
 
         self.status_indicator = SerialIndicator(
             self.frame,
@@ -290,7 +295,13 @@ class SerialView(View):
             width=76,
             height=28,
         )
-        self.connect_btn.grid(row=0, column=2, padx=(6, 15), pady=(20, 6), sticky="ew")
+        self.connect_btn.grid(
+            row=0,
+            column=2,
+            padx=(6, 15),
+            pady=(20, 6),
+            sticky="ew",
+        )
 
         self._event_handlers = {
             "refresh": self.refresh,
@@ -343,3 +354,9 @@ class SerialView(View):
         if not ports:
             return ["Select"]
         return ports
+
+    def trigger(self, event_name: str) -> None:
+        """Dispatch one named event."""
+        handler = self._event_handlers.get(event_name)
+        if handler is not None:
+            handler()

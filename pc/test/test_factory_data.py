@@ -15,7 +15,7 @@ from factory_data import (
     MatterAttestationDataRetriever,
     MatterOnboardingDataRetriever,
 )
-from storage import CdStore, DacCredentialPoolStore, PaiCertStore
+from storage import CdCertStore, DacCredentialPoolStore, PaiCertStore
 
 
 # These PEM samples are derived from the example material discussed earlier.
@@ -193,7 +193,7 @@ def test_dac_pool_store_pull_report_flow(dac_dir: Path):
 
 def test_pai_and_cd_store_load(pai_file: Path, cd_file: Path):
     pai_store = PaiCertStore()
-    cd_store = CdStore()
+    cd_store = CdCertStore()
 
     pai_store.set_file(pai_file)
     cd_store.set_file(cd_file)
@@ -272,7 +272,7 @@ def test_provider_pull_and_report(
 ):
     dac_store = DacCredentialPoolStore()
     pai_store = PaiCertStore()
-    cd_store = CdStore()
+    cd_store = CdCertStore()
 
     dac_store.set_directory(dac_dir)
     pai_store.set_file(pai_file)

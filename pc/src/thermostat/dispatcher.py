@@ -114,14 +114,14 @@ class ThermostatDispatcher(ProvisionDispatcher):
         _DispatchItem(
             index=3,
             key_candidates=("dac_private_key", "dac_priv", "dac_key"),
-            required=False,
+            required=True,
             kind="base64_bytes",
             description="DAC private key",
         ),
         _DispatchItem(
             index=4,
             key_candidates=("dac_public_key", "dac_pub"),
-            required=False,
+            required=True,
             kind="base64_bytes",
             description="DAC public key",
         ),

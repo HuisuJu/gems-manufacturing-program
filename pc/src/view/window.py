@@ -4,8 +4,6 @@ import sys
 
 from traceback import format_exception
 
-from typing import Callable
-
 import tkinter as tk
 
 import customtkinter as ctk
@@ -14,10 +12,9 @@ from logger import Logger, LogLevel
 
 from system import ModelName
 
-from .startup_dialog import StartupSelectionDialog
+from .frame import ProvisioningFrame, SettingFrame
 
-
-PageFactory = Callable[[ctk.CTkFrame], ctk.CTkFrame]
+from .dialog.startup import StartupSelectionDialog
 
 
 class Window(ctk.CTk):
@@ -36,8 +33,11 @@ class Window(ctk.CTk):
         - Page instances are exposed through self.pages.
     """
 
-    def __init__(self, page_factories: list[tuple[PageFactory, str]]):
+    def __init__(self, serial_manager, emulator_serial_manager):
         super().__init__()
+
+        self._serial_manager = serial_manager
+        self._emulator_serial_manager = emulator_serial_manager
 
         self.title("Hyundai HT GEMS Factory Provisioning Tool")
         self.selected_model_name: ModelName | None = None
@@ -51,7 +51,7 @@ class Window(ctk.CTk):
 
         self.selected_model_name = selected_model_name
 
-        self._initialize_main_layout(page_factories)
+        self._initialize_main_layout()
 
         self._show_main_window_safely()
 
@@ -62,10 +62,7 @@ class Window(ctk.CTk):
         dialog = StartupSelectionDialog(self)
         return dialog.show_modal()
 
-    def _initialize_main_layout(
-        self,
-        page_factories: list[tuple[PageFactory, str]],
-    ) -> None:
+    def _initialize_main_layout(self) -> None:
         """
         Build the main window layout and page tabs.
         """
@@ -78,6 +75,21 @@ class Window(ctk.CTk):
 
         self._tabview = ctk.CTkTabview(self)
         self._tabview.grid(row=0, column=0, padx=20, pady=(0, 20), sticky="nsew")
+
+        selected_serial_manager = self._serial_manager
+        if self.selected_model_name == ModelName.EMULATOR:
+            selected_serial_manager = self._emulator_serial_manager
+
+        page_factories = [
+            (
+                lambda master: ProvisioningFrame(
+                    master,
+                    serial_manager=selected_serial_manager,
+                ),
+                "Provisioning",
+            ),
+            (lambda master: SettingFrame(master), "Setting"),
+        ]
 
         for page_factory, page_name in page_factories:
             tab = self._tabview.add(page_name)

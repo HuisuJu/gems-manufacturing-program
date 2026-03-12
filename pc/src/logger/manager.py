@@ -8,8 +8,6 @@ from queue import Empty, Queue
 from threading import Lock, Thread
 from typing import Callable, Optional
 
-from gui.popup.alert import AlertManager
-
 
 class LogLevel(Enum):
     """Defines supported log severity levels."""
@@ -310,16 +308,3 @@ class Logger:
             else:
                 listeners = []
 
-        if is_alert:
-            AlertManager.error("Alert", request.message)
-
-        for listener in listeners:
-            try:
-                listener(record)
-            except Exception as exc:
-                AlertManager.error(
-                    "Alert",
-                    "로그 리스너 처리 중 오류가 발생했습니다. "
-                    "화면 로그 업데이트가 일부 누락될 수 있습니다. "
-                    f"({type(exc).__name__}: {exc})",
-                )

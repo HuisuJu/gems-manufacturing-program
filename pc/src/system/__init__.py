@@ -3,7 +3,9 @@ from .settings import (
     Settings,
     SettingsError,
     SettingsItem,
-    SettingsValidationError,
+    SettingsSerializationError,
+    SettingsTypeError,
+    SettingsValue,
 )
 from .utils import program_metadata_path
 
@@ -12,6 +14,8 @@ __all__ = [
     'Settings',
     'SettingsError',
     'SettingsItem',
-    'SettingsValidationError',
+    'SettingsSerializationError',
+    'SettingsTypeError',
+    'SettingsValue',
     'program_metadata_path',
 ]

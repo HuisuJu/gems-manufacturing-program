@@ -6,10 +6,8 @@ import customtkinter as ctk
 
 from logger import Logger, LogRecord
 
-from .base import View
 
-
-class LogBoxView(View):
+class LogBoxView(ctk.CTkFrame):
     """
     Display live log records in a scrollable text box.
 
