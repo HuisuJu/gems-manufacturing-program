@@ -6,7 +6,7 @@ import customtkinter as ctk
 
 from logger import Logger, LogLevel
 
-from settings import ModelName, SettingsItem, settings as app_settings
+from system import ModelName, Settings, SettingsItem
 
 
 class StartupSelectionDialog(ctk.CTkToplevel):
@@ -134,7 +134,7 @@ class StartupSelectionDialog(ctk.CTkToplevel):
 
         try:
             model_name = ModelName(selected_model)
-            app_settings.set(SettingsItem.MODEL_NAME, model_name)
+            Settings.set(SettingsItem.MODEL_NAME, model_name)
         except Exception as exc:
             self._status_label.configure(text=str(exc))
             return

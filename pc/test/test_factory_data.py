@@ -15,7 +15,7 @@ from factory_data import (
     MatterAttestationDataRetriever,
     MatterOnboardingDataRetriever,
 )
-from matter.attestation_store import CdStore, DacCredentialPoolStore, PaiCertStore
+from storage import CdStore, DacCredentialPoolStore, PaiCertStore
 
 
 # These PEM samples are derived from the example material discussed earlier.
@@ -198,8 +198,8 @@ def test_pai_and_cd_store_load(pai_file: Path, cd_file: Path):
     pai_store.set_file(pai_file)
     cd_store.set_file(cd_file)
 
-    pai_der = pai_store.get_der()
-    cd_der = cd_store.get_der()
+    pai_der = pai_store.get()
+    cd_der = cd_store.get()
 
     assert isinstance(pai_der, bytes)
     assert len(pai_der) > 0

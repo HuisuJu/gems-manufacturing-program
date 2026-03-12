@@ -12,7 +12,7 @@ import customtkinter as ctk
 
 from logger import Logger, LogLevel
 
-from settings import ModelName
+from system import ModelName
 
 from .startup_dialog import StartupSelectionDialog
 

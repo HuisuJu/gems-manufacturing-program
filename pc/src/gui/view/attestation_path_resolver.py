@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from settings import SettingsItem, settings as app_settings
+from system import Settings, SettingsItem
 
 
 DacStatus = Literal["ready", "consumed", "error"]
@@ -93,12 +93,12 @@ class DacCredentialPoolPathResolver:
         self._directory: Path | None = None
         self._leased_path: DacCredentialPath | None = None
 
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.DAC_POOL_DIR_PATH,
             self._on_setting_changed,
         )
 
-        current_value = app_settings.get(SettingsItem.DAC_POOL_DIR_PATH)
+        current_value = Settings.get(SettingsItem.DAC_POOL_DIR_PATH)
         self._apply_directory(current_value)
 
     @property
@@ -252,7 +252,7 @@ class DacCredentialPoolPathResolver:
 
     def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
         """
-        Apply DAC pool directory changes from settings.
+        Apply DAC pool directory changes from system.
         """
         if item != SettingsItem.DAC_POOL_DIR_PATH:
             return
@@ -261,7 +261,7 @@ class DacCredentialPoolPathResolver:
 
     def _apply_directory(self, value: object | None) -> None:
         """
-        Apply the DAC directory value received from settings.
+        Apply the DAC directory value received from system.
         """
         if value is None:
             self._directory = None
@@ -412,7 +412,7 @@ class DacCredentialPoolPathResolver:
 
 class PaiCertPathResolver:
     """
-    Resolve the configured PAI certificate file path from settings.
+    Resolve the configured PAI certificate file path from system.
     """
 
     def __init__(self) -> None:
@@ -421,12 +421,12 @@ class PaiCertPathResolver:
         """
         self._path: Path | None = None
 
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.PAI_FILE_PATH,
             self._on_setting_changed,
         )
 
-        current_value = app_settings.get(SettingsItem.PAI_FILE_PATH)
+        current_value = Settings.get(SettingsItem.PAI_FILE_PATH)
         self._apply_path(current_value)
 
     def get_path(self) -> Path:
@@ -445,7 +445,7 @@ class PaiCertPathResolver:
 
     def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
         """
-        Apply PAI file path changes from settings.
+        Apply PAI file path changes from system.
         """
         if item != SettingsItem.PAI_FILE_PATH:
             return
@@ -454,7 +454,7 @@ class PaiCertPathResolver:
 
     def _apply_path(self, value: object | None) -> None:
         """
-        Apply the PAI file path value received from settings.
+        Apply the PAI file path value received from system.
         """
         if value is None:
             self._path = None
@@ -470,7 +470,7 @@ class PaiCertPathResolver:
 
 class CdPathResolver:
     """
-    Resolve the configured Certification Declaration file path from settings.
+    Resolve the configured Certification Declaration file path from system.
     """
 
     def __init__(self) -> None:
@@ -479,12 +479,12 @@ class CdPathResolver:
         """
         self._path: Path | None = None
 
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.CD_FILE_PATH,
             self._on_setting_changed,
         )
 
-        current_value = app_settings.get(SettingsItem.CD_FILE_PATH)
+        current_value = Settings.get(SettingsItem.CD_FILE_PATH)
         self._apply_path(current_value)
 
     def get_path(self) -> Path:
@@ -503,7 +503,7 @@ class CdPathResolver:
 
     def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
         """
-        Apply CD file path changes from settings.
+        Apply CD file path changes from system.
         """
         if item != SettingsItem.CD_FILE_PATH:
             return
@@ -512,7 +512,7 @@ class CdPathResolver:
 
     def _apply_path(self, value: object | None) -> None:
         """
-        Apply the CD file path value received from settings.
+        Apply the CD file path value received from system.
         """
         if value is None:
             self._path = None

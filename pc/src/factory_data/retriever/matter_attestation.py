@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
+
 from typing import Any, AbstractSet, Mapping
 
 from logger import Logger, LogLevel
 
-from matter.attestation_store import (
+from storage import (
     CdStore,
     DacCredentialPoolStore,
     PaiCertStore,
@@ -16,21 +17,7 @@ from .base import Retriever, RetrieverError
 
 class MatterAttestationDataRetriever(Retriever):
     """
-    Retrieve Matter attestation-related factory data.
-
-    This retriever uses:
-    - DacCredentialPoolStore for DAC certificate/public key/private key material
-    - PaiCertStore for the shared PAI certificate
-    - CdStore for the shared Certification Declaration
-
-    Returned fields:
-    - dac_cert
-    - dac_public_key
-    - dac_private_key
-    - pai_cert
-    - certification_declaration
-
-    Returned values are JSON-compatible Base64-encoded strings.
+    Retrieve Matter attestation factory data.
     """
 
     _SUPPORTED_FIELDS = frozenset({
@@ -48,7 +35,7 @@ class MatterAttestationDataRetriever(Retriever):
         cd_store: CdStore,
     ) -> None:
         """
-        Initialize the retriever with attestation asset stores.
+        Initialize with attestation stores.
 
         Args:
             dac_store: DAC credential pool store.
@@ -60,34 +47,33 @@ class MatterAttestationDataRetriever(Retriever):
         self._cd_store = cd_store
 
     @property
+
     def name(self) -> str:
         """
-        Return the logical retriever name.
+        Retriever name.
         """
         return "matter_attestation"
 
     @property
+
     def supported_fields(self) -> AbstractSet[str]:
         """
-        Return the field names that this retriever may return.
+        Supported output fields.
         """
         return self._SUPPORTED_FIELDS
 
     def fetch(self, schema: Mapping[str, Any]) -> dict[str, Any]:
         """
-        Fetch and return Matter attestation fields requested by the schema.
-
-        This retriever pulls one DAC credential pair only when at least one
-        DAC-related field is required by the schema.
+        Fetch requested attestation fields.
 
         Args:
             schema: Factory data schema represented as a Python mapping.
 
         Returns:
-            A flat dictionary containing attestation-related fields.
+            Flat field-value mapping.
 
         Raises:
-            RetrieverError: If required data cannot be obtained.
+            RetrieverError: Fetch failed.
         """
         required_fields = self._get_required_fields(schema)
         target_fields = required_fields & set(self.supported_fields)
@@ -113,25 +99,33 @@ class MatterAttestationDataRetriever(Retriever):
         try:
             if "dac_cert" in target_fields:
                 if dac_material is None:
-                    raise RetrieverError("DAC certificate material is not available.")
+                    raise RetrieverError(
+                        "DAC certificate material is not available."
+                    )
                 result["dac_cert"] = self._encode_bytes(dac_material.dac_cert_der)
 
             if "dac_public_key" in target_fields:
                 if dac_material is None:
                     raise RetrieverError("DAC public key material is not available.")
-                result["dac_public_key"] = self._encode_bytes(dac_material.dac_public_key)
+                result["dac_public_key"] = self._encode_bytes(
+                    dac_material.dac_public_key
+                )
 
             if "dac_private_key" in target_fields:
                 if dac_material is None:
-                    raise RetrieverError("DAC private key material is not available.")
-                result["dac_private_key"] = self._encode_bytes(dac_material.dac_private_key)
+                    raise RetrieverError(
+                        "DAC private key material is not available."
+                    )
+                result["dac_private_key"] = self._encode_bytes(
+                    dac_material.dac_private_key
+                )
 
             if "pai_cert" in target_fields:
-                pai_der = self._pai_store.get_der()
+                pai_der = self._pai_store.get()
                 result["pai_cert"] = self._encode_bytes(pai_der)
 
             if "certification_declaration" in target_fields:
-                cd_der = self._cd_store.get_der()
+                cd_der = self._cd_store.get()
                 result["certification_declaration"] = self._encode_bytes(cd_der)
 
             return result
@@ -142,24 +136,21 @@ class MatterAttestationDataRetriever(Retriever):
                 except Exception as rollback_exc:
                     Logger.write(
                         LogLevel.ALERT,
-                        "DAC 자원 롤백(report=False) 중 오류가 발생했습니다. "
-                        "다음 시도 전 DAC 풀 상태를 확인해 주세요. "
+                        "DAC rollback(report=False) failed. "
+                        "Check DAC pool state before retry. "
                         f"({type(rollback_exc).__name__}: {rollback_exc})",
                     )
             raise
 
     def report(self, is_success: bool) -> None:
         """
-        Report whether the previously pulled DAC pair was successfully used.
-
-        This should be called by the provider after the overall provisioning
-        result is known.
+        Report DAC usage result.
 
         Args:
             is_success: True if provisioning succeeded, otherwise False.
 
         Raises:
-            RetrieverError: If the DAC store report operation fails.
+            RetrieverError: Report failed.
         """
         try:
             self._dac_store.report(is_success=is_success)
@@ -170,7 +161,7 @@ class MatterAttestationDataRetriever(Retriever):
 
     def _get_required_fields(self, schema: Mapping[str, Any]) -> set[str]:
         """
-        Return the top-level required field names declared by the schema.
+        Return required field names from schema.
 
         Args:
             schema: Factory data schema represented as a Python mapping.
@@ -179,7 +170,7 @@ class MatterAttestationDataRetriever(Retriever):
             A set of required field names.
 
         Raises:
-            RetrieverError: If the schema does not define a valid required list.
+            RetrieverError: Invalid schema format.
         """
         required = schema.get("required")
         if not isinstance(required, list):
@@ -191,7 +182,7 @@ class MatterAttestationDataRetriever(Retriever):
 
     def _encode_bytes(self, value: bytes) -> str:
         """
-        Encode binary data as a Base64 ASCII string.
+        Encode bytes as Base64 ASCII.
 
         Args:
             value: Binary value to encode.

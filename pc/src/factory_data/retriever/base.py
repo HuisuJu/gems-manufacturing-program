@@ -7,22 +7,13 @@ from typing import Any, AbstractSet, Mapping
 
 class RetrieverError(Exception):
     """
-    Common error type for retriever implementations.
-
-    Raise this (or a subclass) when data acquisition fails in a way that
-    callers can handle as a retriever-level failure.
+    Base retriever error.
     """
 
 
 class Retriever(ABC):
     """
-    Interface for components that acquire factory data fields.
-
-    Implementation contract:
-    - `fetch()` receives a schema-like mapping as input.
-    - `fetch()` returns a flat dictionary (`str -> Any`).
-    - Returned keys must be a subset of `supported_fields`.
-    - Implementations should not depend on other retrievers' output.
+    Base interface for factory-data retrievers.
     """
 
     @property
@@ -30,7 +21,7 @@ class Retriever(ABC):
 
     def name(self) -> str:
         """
-        Stable retriever identifier used for logging and diagnostics.
+        Stable retriever name.
         """
         raise NotImplementedError
 
@@ -39,7 +30,7 @@ class Retriever(ABC):
 
     def supported_fields(self) -> AbstractSet[str]:
         """
-        Flat field names that this retriever can provide.
+        Field names this retriever can provide.
         """
         raise NotImplementedError
 
@@ -47,20 +38,15 @@ class Retriever(ABC):
 
     def fetch(self, schema: Mapping[str, Any]) -> dict[str, Any]:
         """
-        Acquire data for fields supported by this retriever.
-
-        Output rules:
-        - Return a flat dictionary only.
-        - Include only keys declared in `supported_fields`.
-        - Returning a subset is valid when some values are unavailable.
+        Fetch factory data from the given schema input.
 
         Args:
-            schema: Input schema/constraints for the acquisition process.
+            schema: Schema or constraints used by the retriever.
 
         Returns:
-            Flat field-value mapping produced by this retriever.
+            Flat field-value mapping.
 
         Raises:
-            RetrieverError: Data acquisition failed.
+            RetrieverError: Fetch failed.
         """
         raise NotImplementedError

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -11,7 +12,7 @@ from .view.attestation_path_resolver import (
     DacCredentialPoolPathResolver,
     PaiCertPathResolver,
 )
-from settings import SettingsItem, settings as app_settings
+from system import Settings, SettingsItem
 
 
 class SettingFrame(ctk.CTkFrame):
@@ -101,15 +102,15 @@ class SettingFrame(ctk.CTkFrame):
             sticky="ew",
         )
 
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.DAC_POOL_DIR_PATH,
             self._on_setting_changed,
         )
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.PAI_FILE_PATH,
             self._on_setting_changed,
         )
-        app_settings.subscribe(
+        Settings.subscribe(
             SettingsItem.CD_FILE_PATH,
             self._on_setting_changed,
         )
@@ -117,15 +118,15 @@ class SettingFrame(ctk.CTkFrame):
         self._refresh_view()
 
     def destroy(self) -> None:
-        app_settings.unsubscribe(
+        Settings.unsubscribe(
             SettingsItem.DAC_POOL_DIR_PATH,
             self._on_setting_changed,
         )
-        app_settings.unsubscribe(
+        Settings.unsubscribe(
             SettingsItem.PAI_FILE_PATH,
             self._on_setting_changed,
         )
-        app_settings.unsubscribe(
+        Settings.unsubscribe(
             SettingsItem.CD_FILE_PATH,
             self._on_setting_changed,
         )
@@ -300,9 +301,11 @@ class SettingFrame(ctk.CTkFrame):
             return
 
         try:
-            app_settings.set(
+            normalized_path = self._normalize_selected_path(selected_path)
+            validated_path = self._validate_dac_pool_directory(normalized_path)
+            Settings.set(
                 SettingsItem.DAC_POOL_DIR_PATH,
-                self._normalize_selected_path(selected_path),
+                validated_path,
             )
         except Exception as exc:
             messagebox.showerror(
@@ -324,9 +327,14 @@ class SettingFrame(ctk.CTkFrame):
             return
 
         try:
-            app_settings.set(
+            normalized_path = self._normalize_selected_path(selected_path)
+            validated_path = self._validate_pem_or_der_file(
+                normalized_path,
+                field_label="PAI certificate file",
+            )
+            Settings.set(
                 SettingsItem.PAI_FILE_PATH,
-                self._normalize_selected_path(selected_path),
+                validated_path,
             )
         except Exception as exc:
             messagebox.showerror(
@@ -348,9 +356,14 @@ class SettingFrame(ctk.CTkFrame):
             return
 
         try:
-            app_settings.set(
+            normalized_path = self._normalize_selected_path(selected_path)
+            validated_path = self._validate_pem_or_der_file(
+                normalized_path,
+                field_label="Certification Declaration file",
+            )
+            Settings.set(
                 SettingsItem.CD_FILE_PATH,
-                self._normalize_selected_path(selected_path),
+                validated_path,
             )
         except Exception as exc:
             messagebox.showerror(
@@ -364,7 +377,7 @@ class SettingFrame(ctk.CTkFrame):
         Clear the DAC pool directory setting.
         """
         try:
-            app_settings.clear(SettingsItem.DAC_POOL_DIR_PATH)
+            Settings.clear(SettingsItem.DAC_POOL_DIR_PATH)
         except Exception as exc:
             messagebox.showerror(
                 "DAC Pool Directory",
@@ -377,7 +390,7 @@ class SettingFrame(ctk.CTkFrame):
         Clear the PAI certificate file setting.
         """
         try:
-            app_settings.clear(SettingsItem.PAI_FILE_PATH)
+            Settings.clear(SettingsItem.PAI_FILE_PATH)
         except Exception as exc:
             messagebox.showerror(
                 "PAI Certificate File",
@@ -390,7 +403,7 @@ class SettingFrame(ctk.CTkFrame):
         Clear the Certification Declaration file setting.
         """
         try:
-            app_settings.clear(SettingsItem.CD_FILE_PATH)
+            Settings.clear(SettingsItem.CD_FILE_PATH)
         except Exception as exc:
             messagebox.showerror(
                 "Certification Declaration File",
@@ -399,6 +412,7 @@ class SettingFrame(ctk.CTkFrame):
             )
 
     @staticmethod
+
     def _normalize_selected_path(selected_path: str | None) -> Path | None:
         """
         Normalize a selected path string into a Path instance.
@@ -413,3 +427,55 @@ class SettingFrame(ctk.CTkFrame):
             return None
 
         return Path(normalized).expanduser().resolve()
+
+    @staticmethod
+
+    def _validate_dac_pool_directory(path: Path | None) -> Path:
+        """
+        Validate DAC pool directory selection.
+        """
+        if path is None:
+            raise ValueError("DAC pool directory is required.")
+
+        if not path.exists():
+            raise ValueError("Selected DAC pool directory does not exist.")
+
+        if not path.is_dir():
+            raise ValueError("Selected DAC pool path is not a directory.")
+
+        pem_files = [
+            child for child in path.iterdir()
+            if child.is_file() and child.suffix.lower() == ".pem"
+        ]
+        if not pem_files:
+            raise ValueError(
+                "Selected DAC pool directory does not contain any .pem files."
+            )
+
+        return path
+
+    @staticmethod
+
+    def _validate_pem_or_der_file(
+        path: Path | None,
+        *,
+        field_label: str,
+    ) -> Path:
+        """
+        Validate file selection for attestation artifacts.
+        """
+        if path is None:
+            raise ValueError(f"{field_label} is required.")
+
+        if not path.exists():
+            raise ValueError(f"Selected {field_label} does not exist.")
+
+        if not path.is_file():
+            raise ValueError(f"Selected {field_label} is not a file.")
+
+        if path.suffix.lower() not in {".pem", ".der"}:
+            raise ValueError(
+                f"Selected {field_label} must be a .pem or .der file."
+            )
+
+        return path

@@ -3,7 +3,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from logger import Logger, LogLevel
-from settings import SettingsItem, settings as app_settings
+from system import Settings, SettingsItem
 from stream import SerialStream
 
 from .view import (
@@ -251,7 +251,7 @@ class ProvisioningFrame(ctk.CTkFrame):
         return self.qr_code_view.show_last_qr_code()
 
     def _refresh_target_status(self) -> None:
-        model_name = app_settings.get(SettingsItem.MODEL_NAME)
+        model_name = Settings.get(SettingsItem.MODEL_NAME)
 
         if model_name is None:
             self._target_status_label.configure(

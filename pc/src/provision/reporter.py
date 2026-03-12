@@ -19,8 +19,6 @@ from typing import Any, NamedTuple, Optional
 
 from logger import Logger, LogLevel
 
-from settings import SettingsItem, settings as app_settings
-
 
 class ProvisionReporterError(Exception):
     """
@@ -64,27 +62,15 @@ class ProvisionReportRecord(NamedTuple):
 class ProvisionReporter:
     """
     Write provisioning result files into a target directory.
-
-    The report output path is driven by the global settings module. When the
-    report file path setting is not configured, a default report directory is
-    used next to the downloaded program location.
     """
 
     DEFAULT_REPORT_DIR_NAME = "report"
 
     def __init__(self) -> None:
         """
-        Initialize the reporter and subscribe to settings changes.
+        Initialize the reporter.
         """
         self._report_dir = self._build_default_report_dir()
-
-        app_settings.subscribe(
-            SettingsItem.REPORT_FILE_PATH,
-            self._on_setting_changed,
-        )
-
-        current_value = app_settings.get(SettingsItem.REPORT_FILE_PATH)
-        self._apply_report_file_path(current_value)
 
     def get_report_dir(self) -> Path:
         """
@@ -122,31 +108,6 @@ class ProvisionReporter:
             raise ProvisionReporterError(
                 "Failed to write the provisioning result report file."
             ) from exc
-
-    def _on_setting_changed(self, item: SettingsItem, value: object | None) -> None:
-        """
-        Apply report path changes from settings.
-        """
-        if item != SettingsItem.REPORT_FILE_PATH:
-            return
-
-        self._apply_report_file_path(value)
-
-    def _apply_report_file_path(self, value: object | None) -> None:
-        """
-        Apply the report file path value received from settings.
-
-        When no explicit report file path is configured, the default report
-        directory is used.
-        """
-        if value is None:
-            self._report_dir = self._build_default_report_dir()
-            return
-
-        if not isinstance(value, Path):
-            raise ProvisionReporterError("The report file path setting is invalid.")
-
-        self._report_dir = value.parent
 
     def _build_default_report_dir(self) -> Path:
         """

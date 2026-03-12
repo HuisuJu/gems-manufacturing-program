@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from logger import Logger, LogLevel
 
-from settings import ModelName, SettingsItem, settings as app_settings
+from system import ModelName, Settings, SettingsItem
 
 from stream import SerialStream, Stream
 
@@ -27,7 +27,7 @@ from factory_data.retriever import (
     MatterOnboardingDataRetriever,
 )
 
-from matter.attestation_store import CdStore, DacCredentialPoolStore, PaiCertStore
+from storage import CdStore, DacCredentialPoolStore, PaiCertStore
 
 from provision import ProvisionManager, ProvisionReporter
 
@@ -97,7 +97,7 @@ def _is_provider_prerequisite_ready() -> bool:
         SettingsItem.CD_FILE_PATH,
     )
 
-    return all(app_settings.get(item) is not None for item in required_items)
+    return all(Settings.get(item) is not None for item in required_items)
 
 
 def _build_dispatcher_for_model(
@@ -140,7 +140,7 @@ def _wire_provisioning(
         Logger.write(LogLevel.WARNING, "Provisioning page type is invalid.")
         return
 
-    model_name = cast(ModelName | None, app_settings.get(SettingsItem.MODEL_NAME))
+    model_name = cast(ModelName | None, Settings.get(SettingsItem.MODEL_NAME))
     if model_name is None:
         Logger.write(LogLevel.WARNING, "Model name is not configured.")
         return
@@ -232,7 +232,7 @@ def main() -> None:
 
         def _create_provisioning_frame(master):
             selected_serial_manager = _select_serial_manager_for_model(
-                cast(ModelName | None, app_settings.get(SettingsItem.MODEL_NAME)),
+                cast(ModelName | None, Settings.get(SettingsItem.MODEL_NAME)),
                 serial_manager,
                 emulator_serial_manager,
             )
