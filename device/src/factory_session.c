@@ -1,4 +1,5 @@
 #include <string.h>
+
 #include "factory_platform.h"
 #include "factory_frame.h"
 #include "factory_session.h"
@@ -15,17 +16,18 @@
 #define FACTORY_SESSION_HEADER_SIZE              (3u + FACTORY_SESSION_ID_SIZE + 4u)
 #define FACTORY_PACKET_HEADER_SIZE(has_session)  ((has_session) ? FACTORY_SESSION_HEADER_SIZE : FACTORY_SESSIONLESS_HEADER_SIZE)
 
-#define FACTORY_DEVICE_HELLO_PAYLOAD_VERSION     (0x01u)
 #define FACTORY_PC_HELLO_PAYLOAD_VERSION         (0x01u)
-#define FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE    (2u + 8u + 1u)
+#define FACTORY_DEVICE_HELLO_UUID_MAX_SIZE       (0xFFu)
+#define FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE    (1u + 1u) /* UUID_SIZE + AUTH_REQUIRED */
+#define FACTORY_DEVICE_HELLO_PAYLOAD_MAX_SIZE    (1u + FACTORY_DEVICE_HELLO_UUID_MAX_SIZE + 1u)
 #define FACTORY_PC_HELLO_PAYLOAD_MIN_SIZE        (2u + FACTORY_SESSION_ID_SIZE)
 
-#define FACTORY_UART_MAX_RETRIES    (3u)
-#define FACTORY_UART_RETRY_DELAY_MS (100u)
-#define FACTORY_UART_POLL_DELAY_MS  (3u)
-#define FACTORY_READ_TIMEOUT_MS     (1000u)
-#define FACTORY_WRITE_TIMEOUT_MS    (1000u)
-#define FACTORY_FLOW_CONTROL_TIMEOUT_MS (500u)
+#define FACTORY_UART_MAX_RETRIES                 (3u)
+#define FACTORY_UART_RETRY_DELAY_MS              (100u)
+#define FACTORY_UART_POLL_DELAY_MS               (3u)
+#define FACTORY_READ_TIMEOUT_MS                  (1000u)
+#define FACTORY_WRITE_TIMEOUT_MS                 (1000u)
+#define FACTORY_FLOW_CONTROL_TIMEOUT_MS          (500u)
 
 typedef enum {
     FACTORY_PACKET_TYPE_MESSAGE = 0x01,
@@ -40,24 +42,6 @@ typedef enum {
     FACTORY_PACKET_TYPE_DEVICE_CHALLENGE = 0x23,
 } factory_packet_type_t;
 
-static const factory_packet_type_t sessionless_packets[] = {
-    FACTORY_PACKET_TYPE_PC_HELLO,
-    FACTORY_PACKET_TYPE_PC_ALERT,
-    FACTORY_PACKET_TYPE_DEVICE_HELLO,
-    FACTORY_PACKET_TYPE_DEVICE_ALERT,
-    FACTORY_PACKET_TYPE_DEVICE_CHALLENGE,
-};
-
-static bool is_sessionless_packet(factory_packet_type_t type)
-{
-    for (size_t i = 0; i < sizeof(sessionless_packets) / sizeof(sessionless_packets[0]); i++) {
-        if (sessionless_packets[i] == type) {
-            return true;
-        }
-    }
-    return false;
-}
-
 typedef struct {
     factory_packet_type_t type;
     uint8_t flag;
@@ -65,6 +49,14 @@ typedef struct {
     size_t payload_size;
     bool sessionless;
 } factory_packet_view_t;
+
+static const factory_packet_type_t sessionless_packets[] = {
+    FACTORY_PACKET_TYPE_PC_HELLO,
+    FACTORY_PACKET_TYPE_PC_ALERT,
+    FACTORY_PACKET_TYPE_DEVICE_HELLO,
+    FACTORY_PACKET_TYPE_DEVICE_ALERT,
+    FACTORY_PACKET_TYPE_DEVICE_CHALLENGE,
+};
 
 static struct {
     bool is_opened;
@@ -80,28 +72,317 @@ FACTORY_FRAME_DEFINE(pending_frame);
 
 static bool has_pending_rx_frame;
 
+static uint8_t tx_packet_buffer[FACTORY_PACKET_MAX_SIZE];
+static uint8_t rx_packet_buffer[FACTORY_PACKET_MAX_SIZE];
+
+static factory_frame_fragmenter_context_t tx_fragmenter =
+    FACTORY_FRAME_FRAGMENTER_INIT(tx_packet_buffer);
+
+static factory_frame_assembler_context_t rx_assembler =
+    FACTORY_FRAME_ASSEMBLER_INIT(rx_packet_buffer);
+
+static bool is_sessionless_packet(factory_packet_type_t type)
+{
+    for (size_t i = 0; i < sizeof(sessionless_packets) / sizeof(sessionless_packets[0]); i++) {
+        if (sessionless_packets[i] == type) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool is_alert_packet(factory_packet_type_t type)
+{
+    return (type == FACTORY_PACKET_TYPE_PC_ALERT) ||
+           (type == FACTORY_PACKET_TYPE_DEVICE_ALERT);
+}
+
+static bool is_bye_packet(factory_packet_type_t type)
+{
+    return (type == FACTORY_PACKET_TYPE_PC_BYE) ||
+           (type == FACTORY_PACKET_TYPE_DEVICE_BYE);
+}
+
+static size_t frame_encoded_size(const factory_frame_t *frame_ptr)
+{
+    return FACTORY_FRAME_HEADER_SIZE + (size_t)factory_frame_get_size(frame_ptr);
+}
+
+static void frame_copy(factory_frame_t *dst, const factory_frame_t *src)
+{
+    memcpy(dst, src, frame_encoded_size(src));
+}
+
+static void notify_event(factory_session_event_t event)
+{
+    if (session_context.event_handler) {
+        session_context.event_handler(event);
+    }
+}
+
+static void set_session_error(void)
+{
+    session_context.is_error = true;
+    notify_event(FACTORY_SESSION_EVENT_ERROR);
+}
+
 static void clear_session_state(bool keep_auth_flag)
 {
-    bool require_auth = session_context.require_auth;
+    const bool require_auth = session_context.require_auth;
 
     session_context.is_opened = false;
     session_context.is_error = false;
     session_context.has_session_id = false;
     memset(session_context.session_id, 0, sizeof(session_context.session_id));
     session_context.require_auth = keep_auth_flag ? require_auth : false;
+
     has_pending_rx_frame = false;
 }
 
 static void close_session_and_notify(void)
 {
-    if (session_context.is_opened || session_context.has_session_id) {
-        clear_session_state(false);
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_CLOSED);
-        }
-    } else {
-        clear_session_state(false);
+    const bool had_session = session_context.is_opened || session_context.has_session_id;
+
+    clear_session_state(false);
+
+    if (had_session) {
+        notify_event(FACTORY_SESSION_EVENT_CLOSED);
     }
+}
+
+static int read_exact_until_deadline(uint8_t *buffer, size_t size, uint32_t deadline_ms)
+{
+    if (!buffer && size > 0u) {
+        return -1;
+    }
+
+    size_t total_reads = 0u;
+    uint32_t negative_read_count = 0u;
+
+    while (total_reads < size) {
+        if (factory_platform_get_uptime_ms() >= deadline_ms) {
+            return -2;
+        }
+
+        ssize_t num_reads = factory_platform_uart_read(buffer + total_reads, size - total_reads);
+        if (num_reads < 0) {
+            negative_read_count++;
+            if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
+                return -3;
+            }
+
+            factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
+            continue;
+        }
+
+        if (num_reads == 0) {
+            factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
+            continue;
+        }
+
+        total_reads += (size_t)num_reads;
+        negative_read_count = 0u;
+    }
+
+    return 0;
+}
+
+static int write_exact_until_deadline(const uint8_t *buffer, size_t size, uint32_t deadline_ms)
+{
+    if (!buffer && size > 0u) {
+        return -1;
+    }
+
+    size_t total_written = 0u;
+    uint32_t negative_write_count = 0u;
+
+    while (total_written < size) {
+        if (factory_platform_get_uptime_ms() >= deadline_ms) {
+            return -2;
+        }
+
+        ssize_t num_written = factory_platform_uart_write(buffer + total_written, size - total_written);
+        if (num_written < 0) {
+            negative_write_count++;
+            if (negative_write_count >= FACTORY_UART_MAX_RETRIES) {
+                return -3;
+            }
+
+            factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
+            continue;
+        }
+
+        if (num_written == 0) {
+            factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
+            continue;
+        }
+
+        total_written += (size_t)num_written;
+        negative_write_count = 0u;
+    }
+
+    return 0;
+}
+
+static int read_frame(factory_frame_t *out_frame, uint32_t timeout_ms)
+{
+    if (!out_frame) {
+        return -1;
+    }
+
+    const uint32_t start_ms = factory_platform_get_uptime_ms();
+    const uint32_t deadline_ms = start_ms + timeout_ms;
+
+    uint8_t magic_window[2] = {0u, 0u};
+    uint32_t negative_read_count = 0u;
+
+    while (true) {
+        if (factory_platform_get_uptime_ms() >= deadline_ms) {
+            return -2;
+        }
+
+        magic_window[0] = magic_window[1];
+
+        ssize_t num_reads = factory_platform_uart_read(&magic_window[1], 1u);
+        if (num_reads < 0) {
+            negative_read_count++;
+            if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
+                return -3;
+            }
+
+            factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
+            continue;
+        }
+
+        if (num_reads == 0) {
+            factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
+            continue;
+        }
+
+        negative_read_count = 0u;
+
+        if (decode_u16_be(magic_window) == FACTORY_FRAME_MAGIC) {
+            break;
+        }
+    }
+
+    out_frame->magic[0] = magic_window[0];
+    out_frame->magic[1] = magic_window[1];
+
+    if (read_exact_until_deadline(
+            ((uint8_t *)out_frame) + 2u,
+            FACTORY_FRAME_HEADER_SIZE - 2u,
+            deadline_ms) != 0) {
+        return -4;
+    }
+
+    if (factory_frame_get_size(out_frame) > FACTORY_FRAME_MAX_DATA_SIZE) {
+        return -5;
+    }
+
+    if (read_exact_until_deadline(
+            ((uint8_t *)out_frame) + FACTORY_FRAME_HEADER_SIZE,
+            factory_frame_get_size(out_frame),
+            deadline_ms) != 0) {
+        return -6;
+    }
+
+    return 0;
+}
+
+static int load_next_rx_frame(factory_frame_t *out_frame, uint32_t timeout_ms)
+{
+    if (!out_frame) {
+        return -1;
+    }
+
+    if (has_pending_rx_frame) {
+        frame_copy(out_frame, pending_frame);
+        has_pending_rx_frame = false;
+        return 0;
+    }
+
+    return read_frame(out_frame, timeout_ms);
+}
+
+static int write_frame(const factory_frame_t *frame_ptr, uint32_t timeout_ms)
+{
+    if (!frame_ptr) {
+        return -1;
+    }
+
+    if (factory_frame_get_size(frame_ptr) > FACTORY_FRAME_MAX_DATA_SIZE) {
+        return -2;
+    }
+
+    const uint32_t deadline_ms = factory_platform_get_uptime_ms() + timeout_ms;
+    return write_exact_until_deadline((const uint8_t *)frame_ptr, frame_encoded_size(frame_ptr), deadline_ms);
+}
+
+static int send_flow_control(bool is_ack, uint8_t sequence)
+{
+    if (factory_frame_init(frame) != FACTORY_FRAME_ERROR_NONE) {
+        return -1;
+    }
+
+    if (factory_frame_control_encode(frame, is_ack, sequence) != FACTORY_FRAME_ERROR_NONE) {
+        return -2;
+    }
+
+    return write_frame(frame, FACTORY_WRITE_TIMEOUT_MS);
+}
+
+static int wait_flow_control(uint8_t sequence, bool *is_ack)
+{
+    if (!is_ack) {
+        return -1;
+    }
+
+    const uint32_t start_ms = factory_platform_get_uptime_ms();
+
+    while ((factory_platform_get_uptime_ms() - start_ms) < FACTORY_FLOW_CONTROL_TIMEOUT_MS) {
+        if (factory_frame_init(frame) != FACTORY_FRAME_ERROR_NONE) {
+            return -2;
+        }
+
+        const uint32_t elapsed = factory_platform_get_uptime_ms() - start_ms;
+        const uint32_t remaining = FACTORY_FLOW_CONTROL_TIMEOUT_MS - elapsed;
+
+        int load_result;
+        if (has_pending_rx_frame) {
+            load_result = read_frame(frame, remaining);
+        } else {
+            load_result = load_next_rx_frame(frame, remaining);
+        }
+
+        if (load_result != 0) {
+            return -3;
+        }
+
+        uint8_t response_sequence = 0u;
+        factory_frame_error_code_t err = factory_frame_control_decode(frame, is_ack, &response_sequence);
+
+        if (err == FACTORY_FRAME_ERROR_INVALID_ARGUMENT) {
+            if (!has_pending_rx_frame) {
+                frame_copy(pending_frame, frame);
+                has_pending_rx_frame = true;
+            }
+            continue;
+        }
+
+        if (err != FACTORY_FRAME_ERROR_NONE) {
+            return -4;
+        }
+
+        if (response_sequence != sequence) {
+            continue;
+        }
+
+        return 0;
+    }
+
+    return -5;
 }
 
 static int parse_packet_view(
@@ -120,26 +401,27 @@ static int parse_packet_view(
         return -3;
     }
 
-    factory_packet_type_t type = (factory_packet_type_t)packet[1];
-    bool sessionless = is_sessionless_packet(type);
+    const factory_packet_type_t type = (factory_packet_type_t)packet[1];
+    const bool sessionless = is_sessionless_packet(type);
+    const size_t header_size = sessionless ? FACTORY_SESSIONLESS_HEADER_SIZE : FACTORY_SESSION_HEADER_SIZE;
+    const uint8_t *size_ptr = sessionless ? &packet[3] : &packet[3 + FACTORY_SESSION_ID_SIZE];
 
-    size_t header_size = sessionless ? FACTORY_SESSIONLESS_HEADER_SIZE : FACTORY_SESSION_HEADER_SIZE;
     if (packet_size < header_size) {
         return -4;
     }
 
-    const uint8_t *size_ptr = sessionless ? &packet[3] : &packet[3 + FACTORY_SESSION_ID_SIZE];
     if (!sessionless && require_session_match) {
         if (!session_context.is_opened || !session_context.has_session_id) {
             return -5;
         }
+
         if (memcmp(&packet[3], session_context.session_id, FACTORY_SESSION_ID_SIZE) != 0) {
             return -6;
         }
     }
 
-    size_t payload_size = (size_t)decode_u32_be(size_ptr);
-    if (header_size + payload_size > packet_size) {
+    const size_t payload_size = (size_t)decode_u32_be(size_ptr);
+    if (header_size + payload_size != packet_size) {
         return -7;
     }
 
@@ -154,16 +436,31 @@ static int parse_packet_view(
 
 static int build_device_hello_payload(uint8_t *payload, size_t payload_capacity, size_t *payload_size)
 {
-    if (!payload || !payload_size || payload_capacity < FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE) {
+    size_t uuid_size;
+
+    if (!payload || !payload_size) {
         return -1;
     }
+    if (payload_capacity < FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE) {
+        return -2;
+    }
 
-    payload[0] = FACTORY_DEVICE_HELLO_PAYLOAD_VERSION;
-    payload[1] = FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE;
-    encode_u64_be(&payload[2], factory_platform_get_uuid());
-    payload[10] = session_context.require_auth ? 1u : 0u;
+    uuid_size = payload_capacity - 2u;
+    if (uuid_size > FACTORY_DEVICE_HELLO_UUID_MAX_SIZE) {
+        uuid_size = FACTORY_DEVICE_HELLO_UUID_MAX_SIZE;
+    }
 
-    *payload_size = FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE;
+    if (factory_platform_get_uuid(&payload[1], &uuid_size) != 0) {
+        return -3;
+    }
+    if (uuid_size == 0u || uuid_size > FACTORY_DEVICE_HELLO_UUID_MAX_SIZE) {
+        return -4;
+    }
+
+    payload[0] = (uint8_t)uuid_size;
+    payload[1u + uuid_size] = session_context.require_auth ? 1u : 0u;
+
+    *payload_size = 1u + uuid_size + 1u;
     return 0;
 }
 
@@ -176,8 +473,8 @@ static int parse_pc_hello_payload(const uint8_t *payload, size_t payload_size, u
         return -2;
     }
 
-    uint8_t declared_size = payload[1];
-    if (declared_size > payload_size || declared_size < FACTORY_PC_HELLO_PAYLOAD_MIN_SIZE) {
+    const uint8_t declared_size = payload[1];
+    if (declared_size < FACTORY_PC_HELLO_PAYLOAD_MIN_SIZE || declared_size > payload_size) {
         return -3;
     }
 
@@ -185,299 +482,102 @@ static int parse_pc_hello_payload(const uint8_t *payload, size_t payload_size, u
     return 0;
 }
 
-static int read_frame(factory_frame_t *frame, uint32_t timeout_ms)
+static int build_packet(
+    factory_packet_type_t type,
+    uint8_t flag,
+    const uint8_t *payload,
+    size_t payload_size,
+    uint8_t *packet_out,
+    size_t packet_capacity,
+    size_t *packet_size_out)
 {
-    if (!frame) {
+    if ((!payload && payload_size > 0u) || !packet_out || !packet_size_out) {
         return -1;
     }
 
-    const uint32_t start_ms = factory_platform_get_uptime_ms();
-    uint8_t magic_buf[2] = {0, 0};
-    uint32_t negative_read_count = 0;
+    const bool sessionless = is_sessionless_packet(type);
+    const bool has_session = !sessionless;
+    const size_t header_size = FACTORY_PACKET_HEADER_SIZE(has_session);
+    const size_t packet_size = header_size + payload_size;
 
-    // Search for magic number (0xFAC0) byte by byte
-    while (1) {
-        if ((factory_platform_get_uptime_ms() - start_ms) >= timeout_ms) {
-            return -2;  // Timeout
-        }
-
-        // Read one byte for magic detection
-        magic_buf[0] = magic_buf[1];
-        size_t total_reads = 0;
-        while (total_reads < 1) {
-            ssize_t num_reads = factory_platform_uart_read(&magic_buf[1], 1);
-            if (num_reads < 0) {
-                negative_read_count++;
-                if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
-                    return -3;
-                }
-                factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
-                continue;
-            }
-            if (num_reads > 0) {
-                total_reads += (size_t)num_reads;
-                negative_read_count = 0;
-            } else {
-                factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
-            }
-        }
-
-        // Check if we found the magic number
-        uint16_t magic = ((uint16_t)magic_buf[0] << 8) | (uint16_t)magic_buf[1];
-        if (magic == FACTORY_FRAME_MAGIC) {
-            break;
-        }
-    }
-
-    // Read rest of header in wire format: type(1) | size(2, BE) | crc16(2, BE)
-    uint8_t header_rest[FACTORY_FRAME_HEADER_SIZE - 2];
-    size_t header_remaining = sizeof(header_rest);
-    size_t total_reads = 0;
-    negative_read_count = 0;
-
-    while (total_reads < header_remaining) {
-        if ((factory_platform_get_uptime_ms() - start_ms) >= timeout_ms) {
-            return -4;
-        }
-
-        ssize_t num_reads = factory_platform_uart_read(header_rest + total_reads, header_remaining - total_reads);
-        if (num_reads < 0) {
-            negative_read_count++;
-            if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
-                return -5;
-            }
-            factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
-            continue;
-        }
-        if (num_reads > 0) {
-            total_reads += (size_t)num_reads;
-            negative_read_count = 0;
-        } else {
-            factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
-        }
-    }
-
-    // Decode header fields from wire format
-    frame->magic = FACTORY_FRAME_MAGIC;
-    frame->type = header_rest[0];
-    frame->size = decode_u16_be(&header_rest[1]);
-    frame->crc16 = decode_u16_be(&header_rest[3]);
-
-    // Validate frame size
-    if (frame->size > FACTORY_FRAME_MAX_DATA_SIZE) {
-        return -6;
-    }
-
-    // Read data payload
-    if (frame->size > 0) {
-        uint8_t *data_ptr = ((uint8_t *)frame) + FACTORY_FRAME_HEADER_SIZE;
-        total_reads = 0;
-        negative_read_count = 0;
-
-        while (total_reads < frame->size) {
-            if ((factory_platform_get_uptime_ms() - start_ms) >= timeout_ms) {
-                return -7;
-            }
-
-            ssize_t num_reads = factory_platform_uart_read(data_ptr + total_reads, frame->size - total_reads);
-            if (num_reads < 0) {
-                negative_read_count++;
-                if (negative_read_count >= FACTORY_UART_MAX_RETRIES) {
-                    return -8;
-                }
-                factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
-                continue;
-            }
-            if (num_reads > 0) {
-                total_reads += (size_t)num_reads;
-                negative_read_count = 0;
-            } else {
-                factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
-            }
-        }
-    }
-
-    return 0;
-}
-
-static int load_next_rx_frame(factory_frame_t *out_frame, uint32_t timeout_ms)
-{
-    if (!out_frame) {
-        return -1;
-    }
-
-    if (has_pending_rx_frame) {
-        memcpy(out_frame, pending_frame, FACTORY_FRAME_HEADER_SIZE + pending_frame->size);
-        has_pending_rx_frame = false;
-        return 0;
-    }
-
-    return read_frame(out_frame, timeout_ms);
-}
-
-static int write_frame(const factory_frame_t *frame, uint32_t timeout_ms)
-{
-    if (!frame) {
-        return -1;
-    }
-
-    if (frame->size > FACTORY_FRAME_MAX_DATA_SIZE) {
-        return -4;
-    }
-
-    uint8_t raw[FACTORY_FRAME_MAX_SIZE];
-    raw[0] = (uint8_t)((FACTORY_FRAME_MAGIC >> 8) & 0xFFu);
-    raw[1] = (uint8_t)(FACTORY_FRAME_MAGIC & 0xFFu);
-    raw[2] = frame->type;
-    encode_u16_be(&raw[3], frame->size);
-    encode_u16_be(&raw[5], frame->crc16);
-    if (frame->size > 0) {
-        memcpy(&raw[FACTORY_FRAME_HEADER_SIZE], ((const uint8_t *)frame) + FACTORY_FRAME_HEADER_SIZE, frame->size);
-    }
-
-    const size_t frame_size = FACTORY_FRAME_HEADER_SIZE + frame->size;
-    size_t total_written = 0;
-    uint32_t negative_write_count = 0;
-    const uint32_t start_ms = factory_platform_get_uptime_ms();
-
-    while (total_written < frame_size) {
-        if ((factory_platform_get_uptime_ms() - start_ms) >= timeout_ms) {
-            return -2;
-        }
-
-        ssize_t num_written = factory_platform_uart_write(raw + total_written, frame_size - total_written);
-        if (num_written < 0) {
-            negative_write_count++;
-            if (negative_write_count >= FACTORY_UART_MAX_RETRIES) {
-                return -3;
-            }
-            factory_platform_sleep(FACTORY_UART_RETRY_DELAY_MS);
-            continue;
-        }
-
-        if (num_written > 0) {
-            total_written += (size_t)num_written;
-            negative_write_count = 0;
-        } else {
-            factory_platform_sleep(FACTORY_UART_POLL_DELAY_MS);
-        }
-    }
-
-    return 0;
-}
-
-static int send_flow_control(bool is_ack, uint8_t sequence)
-{
-    if (factory_frame_init(frame) != 0) {
-        return -1;
-    }
-
-    if (factory_frame_control_encode(frame, is_ack, sequence) != FACTORY_FRAME_ERROR_NONE) {
+    if (packet_size > packet_capacity) {
         return -2;
     }
 
-    return write_frame((const factory_frame_t *)frame, FACTORY_WRITE_TIMEOUT_MS);
+    if (has_session && (!session_context.is_opened || !session_context.has_session_id)) {
+        return -3;
+    }
+
+    packet_out[0] = FACTORY_PROTOCOL_VERSION;
+    packet_out[1] = (uint8_t)type;
+    packet_out[2] = flag;
+
+    if (sessionless) {
+        encode_u32_be(&packet_out[3], (uint32_t)payload_size);
+        if (payload_size > 0u) {
+            memcpy(&packet_out[FACTORY_SESSIONLESS_HEADER_SIZE], payload, payload_size);
+        }
+    } else {
+        memcpy(&packet_out[3], session_context.session_id, FACTORY_SESSION_ID_SIZE);
+        encode_u32_be(&packet_out[3 + FACTORY_SESSION_ID_SIZE], (uint32_t)payload_size);
+        if (payload_size > 0u) {
+            memcpy(&packet_out[FACTORY_SESSION_HEADER_SIZE], payload, payload_size);
+        }
+    }
+
+    *packet_size_out = packet_size;
+    return 0;
 }
 
-static int wait_flow_control(uint8_t sequence, bool *is_ack)
+static int prepare_tx_fragmenter(
+    factory_packet_type_t type,
+    uint8_t flag,
+    const uint8_t *payload,
+    size_t payload_size)
 {
-    if (!is_ack) {
+    size_t packet_size = 0u;
+
+    if (build_packet(type,
+                     flag,
+                     payload,
+                     payload_size,
+                     tx_packet_buffer,
+                     sizeof(tx_packet_buffer),
+                     &packet_size) != 0) {
         return -1;
     }
 
-    const uint32_t start_ms = factory_platform_get_uptime_ms();
-
-    while ((factory_platform_get_uptime_ms() - start_ms) < FACTORY_FLOW_CONTROL_TIMEOUT_MS) {
-        if (factory_frame_init(frame) != 0) {
-            return -2;
-        }
-
-        uint32_t elapsed = factory_platform_get_uptime_ms() - start_ms;
-        uint32_t remaining = FACTORY_FLOW_CONTROL_TIMEOUT_MS - elapsed;
-        if (load_next_rx_frame(frame, remaining) != 0) {
-            return -3;
-        }
-
-        uint8_t response_sequence = 0;
-        factory_frame_error_code_t err = factory_frame_control_decode(frame, is_ack, &response_sequence);
-        if (err == FACTORY_FRAME_ERROR_INVALID_ARGUMENT) {
-            if (!has_pending_rx_frame) {
-                memcpy(pending_frame, frame, FACTORY_FRAME_HEADER_SIZE + frame->size);
-                has_pending_rx_frame = true;
-            }
-            continue;
-        }
-        if (err != FACTORY_FRAME_ERROR_NONE) {
-            return -4;
-        }
-        if (response_sequence != sequence) {
-            continue;
-        }
-
-        return 0;
+    if (factory_frame_fragmenter_init(&tx_fragmenter, packet_size) != FACTORY_FRAME_ERROR_NONE) {
+        return -2;
     }
 
-    return -5;
+    return 0;
 }
 
-static factory_frame_fragmenter_context_t *setup_fragmenter(
-    factory_packet_type_t type, uint8_t flag, const uint8_t *payload, size_t payload_size)
+static int prepare_rx_assembler(void)
 {
-    static factory_frame_fragmenter_context_t ctx = FACTORY_FRAME_FRAGMENTER_INIT(FACTORY_PACKET_MAX_SIZE);
-
-    const bool sessionless = is_sessionless_packet(type);
-    const size_t header_size = FACTORY_PACKET_HEADER_SIZE(!sessionless);
-    const size_t packet_size = header_size + payload_size;
-
-    if (packet_size > FACTORY_PACKET_MAX_SIZE) {
-        return NULL;
-    }
-    if (!sessionless && (!session_context.is_opened || !session_context.has_session_id)) {
-        return NULL;
-    }
-
-    if (factory_frame_fragmenter_init(&ctx, packet_size) != FACTORY_FRAME_ERROR_NONE) {
-        return NULL;
-    }
-
-    uint8_t *packet = ctx.packet;
-    packet[0] = FACTORY_PROTOCOL_VERSION;
-    packet[1] = (uint8_t)type;
-    packet[2] = flag;
-
-    if (sessionless) {
-        encode_u32_be(&packet[3], (uint32_t)payload_size);
-        if (payload_size > 0 && payload != NULL) {
-            memcpy(&packet[FACTORY_SESSIONLESS_HEADER_SIZE], payload, payload_size);
-        }
-    } else {
-        memcpy(&packet[3], session_context.session_id, FACTORY_SESSION_ID_SIZE);
-        encode_u32_be(&packet[3 + FACTORY_SESSION_ID_SIZE], (uint32_t)payload_size);
-        if (payload_size > 0 && payload != NULL) {
-            memcpy(&packet[FACTORY_PACKET_HEADER_SIZE(true)], payload, payload_size);
-        }
-    }
-
-    return &ctx;
+    return (factory_frame_assembler_init(&rx_assembler) == FACTORY_FRAME_ERROR_NONE) ? 0 : -1;
 }
 
-static int send_packet(factory_frame_fragmenter_context_t *fragmenter)
+static int send_current_packet(void)
 {
-    while (!fragmenter->has_finished && !fragmenter->has_error) {
-        if (factory_frame_init(frame) != 0) {
+    while (!tx_fragmenter.has_finished && !tx_fragmenter.has_error) {
+        if (factory_frame_init(frame) != FACTORY_FRAME_ERROR_NONE) {
             return -1;
         }
-        if (factory_frame_fragmenter_process(fragmenter, frame) != FACTORY_FRAME_ERROR_NONE) {
+
+        if (factory_frame_fragmenter_process(&tx_fragmenter, frame) != FACTORY_FRAME_ERROR_NONE) {
             return -2;
         }
 
-        uint8_t sequence = 0;
+        uint8_t sequence = 0u;
         if (factory_frame_get_sequence(frame, &sequence) != FACTORY_FRAME_ERROR_NONE) {
             return -3;
         }
 
-        uint32_t retry_count = 0;
+        uint32_t retry_count = 0u;
         bool sent = false;
+
         while (retry_count < FACTORY_PACKET_RETRY_COUNT) {
             if (write_frame(frame, FACTORY_WRITE_TIMEOUT_MS) != 0) {
                 retry_count++;
@@ -502,58 +602,49 @@ static int send_packet(factory_frame_fragmenter_context_t *fragmenter)
             return -4;
         }
     }
-    if (fragmenter->has_error) {
-        return -5;
-    }
 
-    return 0;
+    return tx_fragmenter.has_error ? -5 : 0;
 }
 
-static factory_frame_assembler_context_t *setup_assembler(void)
+static int receive_one_packet(uint8_t **packet_out, size_t *packet_size_out)
 {
-    static factory_frame_assembler_context_t ctx = FACTORY_FRAME_ASSEMBLER_INIT(FACTORY_PACKET_MAX_SIZE);
-
-    if (factory_frame_assembler_init(&ctx) != FACTORY_FRAME_ERROR_NONE) {
-        return NULL;
-    }
-
-    return &ctx;
-}
-
-static int receive_packet(factory_frame_assembler_context_t *assembler, uint8_t **packet_out, size_t *packet_size_out)
-{
-    if (!assembler || !packet_out || !packet_size_out) {
+    if (!packet_out || !packet_size_out) {
         return -1;
     }
 
-    while (!assembler->has_finished && !assembler->has_error) {
-        if (factory_frame_init(frame) != 0) {
-            return -2;
+    if (prepare_rx_assembler() != 0) {
+        return -2;
+    }
+
+    while (!rx_assembler.has_finished && !rx_assembler.has_error) {
+        if (factory_frame_init(frame) != FACTORY_FRAME_ERROR_NONE) {
+            return -3;
         }
 
         if (load_next_rx_frame(frame, FACTORY_READ_TIMEOUT_MS) != 0) {
-            return -3;
+            return -4;
         }
 
         if (frame->type == FACTORY_FRAME_TYPE_ACK || frame->type == FACTORY_FRAME_TYPE_NACK) {
             continue;
         }
 
-        uint8_t sequence = 0;
+        uint8_t sequence = 0u;
         if (factory_frame_get_sequence(frame, &sequence) != FACTORY_FRAME_ERROR_NONE) {
-            return -4;
+            return -5;
         }
 
-        if (frame->type == FACTORY_FRAME_TYPE_CONSECUTIVE && sequence < assembler->sequence) {
-            (void)send_flow_control(true, sequence);
-            continue;
-        }
-        if (frame->type == FACTORY_FRAME_TYPE_FIRST && assembler->sequence > 0 && sequence == 0) {
+        if (frame->type == FACTORY_FRAME_TYPE_CONSECUTIVE && sequence < rx_assembler.sequence) {
             (void)send_flow_control(true, sequence);
             continue;
         }
 
-        factory_frame_error_code_t err = factory_frame_assembler_process(assembler, frame);
+        if (frame->type == FACTORY_FRAME_TYPE_FIRST && rx_assembler.sequence > 0u && sequence == 0u) {
+            (void)send_flow_control(true, sequence);
+            continue;
+        }
+
+        factory_frame_error_code_t err = factory_frame_assembler_process(&rx_assembler, frame);
         if (err != FACTORY_FRAME_ERROR_NONE) {
             (void)send_flow_control(false, sequence);
             return -6;
@@ -564,64 +655,64 @@ static int receive_packet(factory_frame_assembler_context_t *assembler, uint8_t 
         }
     }
 
-    if (assembler->has_error) {
+    if (rx_assembler.has_error) {
         return -8;
     }
 
-    *packet_out = assembler->packet;
-    *packet_size_out = assembler->packet_size;
+    *packet_out = rx_assembler.packet;
+    *packet_size_out = rx_assembler.packet_size;
     return 0;
+}
+
+static int send_packet(
+    factory_packet_type_t type,
+    uint8_t flag,
+    const uint8_t *payload,
+    size_t payload_size)
+{
+    if (prepare_tx_fragmenter(type, flag, payload, payload_size) != 0) {
+        return -1;
+    }
+
+    return send_current_packet();
 }
 
 static int session_send_device_hello(void)
 {
-    uint8_t payload[FACTORY_DEVICE_HELLO_PAYLOAD_MIN_SIZE] = {0};
-    size_t payload_size = 0;
+    uint8_t payload[FACTORY_DEVICE_HELLO_PAYLOAD_MAX_SIZE] = {0u};
+    size_t payload_size = 0u;
 
     if (build_device_hello_payload(payload, sizeof(payload), &payload_size) != 0) {
         return -1;
     }
 
-    factory_frame_fragmenter_context_t *ctx = setup_fragmenter(
-        FACTORY_PACKET_TYPE_DEVICE_HELLO,
-        0,
-        payload,
-        payload_size);
-    if (!ctx) {
-        return -2;
-    }
-    return send_packet(ctx);
+    return send_packet(FACTORY_PACKET_TYPE_DEVICE_HELLO, 0u, payload, payload_size);
 }
 
 static int session_wait_pc_hello(void)
 {
-    uint8_t *packet = NULL;
-    size_t packet_size = 0;
-    factory_packet_view_t view;
-
-    factory_frame_assembler_context_t *assembler = setup_assembler();
-    if (!assembler) {
-        return -1;
-    }
-
     const uint32_t start_ms = factory_platform_get_uptime_ms();
 
-    while (true) {
-        if ((factory_platform_get_uptime_ms() - start_ms) >= FACTORY_OPEN_TIMEOUT_MS) {
-            return -5;
-        }
+    while ((factory_platform_get_uptime_ms() - start_ms) < FACTORY_OPEN_TIMEOUT_MS) {
+        uint8_t *packet = NULL;
+        size_t packet_size = 0u;
+        factory_packet_view_t view;
 
-        if (receive_packet(assembler, &packet, &packet_size) != 0) {
-            return -2;
+        int receive_result = receive_one_packet(&packet, &packet_size);
+        if (receive_result != 0) {
+            if (receive_result == -4) {
+                continue;
+            }
+            return -1;
         }
 
         if (parse_packet_view(packet, packet_size, false, &view) != 0) {
             continue;
         }
 
-        if (view.type == FACTORY_PACKET_TYPE_PC_ALERT || view.type == FACTORY_PACKET_TYPE_DEVICE_ALERT) {
+        if (is_alert_packet(view.type)) {
             close_session_and_notify();
-            return -3;
+            return -2;
         }
 
         if (view.type != FACTORY_PACKET_TYPE_PC_HELLO) {
@@ -629,12 +720,14 @@ static int session_wait_pc_hello(void)
         }
 
         if (parse_pc_hello_payload(view.payload, view.payload_size, session_context.session_id) != 0) {
-            return -4;
+            return -3;
         }
 
         session_context.has_session_id = true;
         return 0;
     }
+
+    return -4;
 }
 
 int factory_session_init(factory_session_event_handler_t event_handler)
@@ -656,28 +749,20 @@ int factory_session_open(bool require_auth)
 
     if (session_send_device_hello() != 0) {
         clear_session_state(false);
-        session_context.is_error = true;
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
+        set_session_error();
         return -1;
     }
 
     if (session_wait_pc_hello() != 0) {
         clear_session_state(false);
-        session_context.is_error = true;
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
+        set_session_error();
         return -2;
     }
 
     session_context.is_opened = true;
     session_context.is_error = false;
+    notify_event(FACTORY_SESSION_EVENT_OPENED);
 
-    if (session_context.event_handler) {
-        session_context.event_handler(FACTORY_SESSION_EVENT_OPENED);
-    }
     return 0;
 }
 
@@ -688,38 +773,22 @@ void factory_session_close(void)
         return;
     }
 
-    factory_frame_fragmenter_context_t *ctx = setup_fragmenter(FACTORY_PACKET_TYPE_DEVICE_BYE, 0, NULL, 0);
-    if (ctx) {
-        (void)send_packet(ctx);
-    }
-
+    (void)send_packet(FACTORY_PACKET_TYPE_DEVICE_BYE, 0u, NULL, 0u);
     close_session_and_notify();
 }
 
 int factory_session_send(const uint8_t *data, size_t size)
 {
-    if ((size > 0 && data == NULL) || size > FACTORY_PACKET_MAX_SIZE) {
-        return -1;
-    }
     if (!session_context.is_opened) {
         return -2;
     }
-
-    factory_frame_fragmenter_context_t *ctx = setup_fragmenter(FACTORY_PACKET_TYPE_MESSAGE, 0, data, size);
-    if (!ctx) {
-        session_context.is_error = true;
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
-        return -3;
+    if (!data && size > 0u) {
+        return -1;
     }
 
-    if (send_packet(ctx) != 0) {
-        session_context.is_error = true;
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
-        return -4;
+    if (send_packet(FACTORY_PACKET_TYPE_MESSAGE, 0u, data, size) != 0) {
+        set_session_error();
+        return -3;
     }
 
     return 0;
@@ -730,23 +799,15 @@ int factory_session_receive(uint8_t *data, size_t *size)
     if (!data || !size) {
         return -1;
     }
-
-    uint8_t *packet = NULL;
-    size_t packet_size = 0;
-    factory_frame_assembler_context_t *assembler = setup_assembler();
-    if (!assembler) {
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
+    if (!session_context.is_opened) {
         return -2;
     }
 
-    int err = receive_packet(assembler, &packet, &packet_size);
-    if (err != 0) {
-        session_context.is_error = true;
-        if (session_context.event_handler) {
-            session_context.event_handler(FACTORY_SESSION_EVENT_ERROR);
-        }
+    uint8_t *packet = NULL;
+    size_t packet_size = 0u;
+
+    if (receive_one_packet(&packet, &packet_size) != 0) {
+        set_session_error();
         return -3;
     }
 
@@ -755,23 +816,25 @@ int factory_session_receive(uint8_t *data, size_t *size)
         return -4;
     }
 
-    if (view.type == FACTORY_PACKET_TYPE_PC_ALERT || view.type == FACTORY_PACKET_TYPE_DEVICE_ALERT) {
+    if (is_alert_packet(view.type)) {
         close_session_and_notify();
         return -5;
+    }
+
+    if (is_bye_packet(view.type)) {
+        close_session_and_notify();
+        *size = 0u;
+        return 0;
     }
 
     if (*size < view.payload_size) {
         return -6;
     }
 
-    if (view.payload_size > 0) {
+    if (view.payload_size > 0u) {
         memcpy(data, view.payload, view.payload_size);
     }
     *size = view.payload_size;
-
-    if (view.type == FACTORY_PACKET_TYPE_PC_BYE || view.type == FACTORY_PACKET_TYPE_DEVICE_BYE) {
-        close_session_and_notify();
-    }
 
     return 0;
 }

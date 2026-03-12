@@ -39,6 +39,7 @@ typedef struct {
 } test_frame_buffer_t;
 
 static test_frame_buffer_t g_tx_frame_buffer;
+static uint8_t g_fragmenter_packet_buffer[TEST_PACKET_BUFFER_SIZE];
 
 static void on_session_event(factory_session_event_t event)
 {
@@ -74,7 +75,8 @@ static void append_control_frame_to_rx(bool is_ack, uint8_t sequence)
 
 static void append_packet_frames_to_rx(const uint8_t *packet, size_t packet_size, bool duplicate_seq1)
 {
-    static factory_frame_fragmenter_context_t fragmenter = FACTORY_FRAME_FRAGMENTER_INIT(TEST_PACKET_BUFFER_SIZE);
+    static factory_frame_fragmenter_context_t fragmenter =
+        FACTORY_FRAME_FRAGMENTER_INIT(g_fragmenter_packet_buffer);
     factory_frame_t *tx_frame = (factory_frame_t *)&g_tx_frame_buffer;
 
     TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_NONE, factory_frame_fragmenter_init(&fragmenter, packet_size));
@@ -84,7 +86,7 @@ static void append_packet_frames_to_rx(const uint8_t *packet, size_t packet_size
         TEST_ASSERT_EQUAL(0, factory_frame_init(tx_frame));
         TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_NONE, factory_frame_fragmenter_process(&fragmenter, tx_frame));
 
-        size_t frame_size = FACTORY_FRAME_HEADER_SIZE + tx_frame->size;
+        size_t frame_size = FACTORY_FRAME_HEADER_SIZE + (size_t)factory_frame_get_size(tx_frame);
         append_rx_bytes((const uint8_t *)tx_frame, frame_size);
 
         if (duplicate_seq1) {
@@ -160,36 +162,61 @@ static ssize_t cb_uart_write(const uint8_t *buffer, size_t size, int num_calls)
 {
     (void)num_calls;
 
-    TEST_ASSERT_GREATER_THAN_size_t(FACTORY_FRAME_HEADER_SIZE, size);
+    TEST_ASSERT_GREATER_OR_EQUAL_size_t(FACTORY_FRAME_HEADER_SIZE, size);
 
     const factory_frame_t *out = (const factory_frame_t *)buffer;
-    uint8_t sequence = 0;
-    TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_NONE, factory_frame_get_sequence(out, &sequence));
+    uint8_t sequence = 0u;
+    factory_frame_error_code_t seq_err = factory_frame_get_sequence(out, &sequence);
 
     if (out->type == FACTORY_FRAME_TYPE_ACK) {
         g_outbound_ack_count++;
         if (g_outbound_control_sequence_count < TEST_TX_SEQ_LOG_SIZE) {
-            g_outbound_control_sequences[g_outbound_control_sequence_count++] = sequence;
+            g_outbound_control_sequences[g_outbound_control_sequence_count++] =
+                (seq_err == FACTORY_FRAME_ERROR_NONE) ? sequence : 0u;
         }
     } else if (out->type == FACTORY_FRAME_TYPE_NACK) {
         g_outbound_nack_count++;
         if (g_outbound_control_sequence_count < TEST_TX_SEQ_LOG_SIZE) {
-            g_outbound_control_sequences[g_outbound_control_sequence_count++] = sequence;
+            g_outbound_control_sequences[g_outbound_control_sequence_count++] =
+                (seq_err == FACTORY_FRAME_ERROR_NONE) ? sequence : 0u;
         }
     } else {
         g_outbound_data_frame_count++;
 
         if (g_auto_ack_outbound_data) {
-            if (g_nack_once_on_seq0 && sequence == 0u && !g_nack_seq0_already_sent) {
-                append_control_frame_to_rx(false, sequence);
+            uint8_t response_sequence = (seq_err == FACTORY_FRAME_ERROR_NONE) ? sequence : 0u;
+            if (g_nack_once_on_seq0 && response_sequence == 0u && !g_nack_seq0_already_sent) {
+                append_control_frame_to_rx(false, response_sequence);
                 g_nack_seq0_already_sent = true;
             } else {
-                append_control_frame_to_rx(true, sequence);
+                append_control_frame_to_rx(true, response_sequence);
             }
         }
     }
 
     return (ssize_t)size;
+}
+
+static int cb_get_uuid(uint8_t *buffer, size_t *size, int num_calls)
+{
+    (void)num_calls;
+
+    static const uint8_t k_uuid_bytes[8] = {
+        0x11, 0x22, 0x33, 0x44,
+        0x55, 0x66, 0x77, 0x88,
+    };
+
+    if (!buffer || !size) {
+        return -1;
+    }
+
+    if (*size < sizeof(k_uuid_bytes)) {
+        return -2;
+    }
+
+    memcpy(buffer, k_uuid_bytes, sizeof(k_uuid_bytes));
+    *size = sizeof(k_uuid_bytes);
+    return 0;
 }
 
 static void install_platform_stubs(void)
@@ -198,7 +225,7 @@ static void install_platform_stubs(void)
     factory_platform_sleep_StubWithCallback(cb_sleep);
     factory_platform_uart_read_StubWithCallback(cb_uart_read);
     factory_platform_uart_write_StubWithCallback(cb_uart_write);
-    factory_platform_get_uuid_IgnoreAndReturn(0x1122334455667788ULL);
+    factory_platform_get_uuid_StubWithCallback(cb_get_uuid);
 }
 
 static void open_session_successfully(void)

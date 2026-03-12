@@ -4,10 +4,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** Maximum encoded packet size handled by session layer (bytes) */
-#define FACTORY_PACKET_MAX_SIZE     (2048)
+#define FACTORY_PACKET_MAX_SIZE     (2048u)
 /** Maximum retry attempts for recoverable packet transfer failures */
-#define FACTORY_PACKET_RETRY_COUNT  (3)
+#define FACTORY_PACKET_RETRY_COUNT  (3u)
 /** Timeout waiting for PC_HELLO during open flow (milliseconds) */
 #define FACTORY_OPEN_TIMEOUT_MS     (5000u)
 
@@ -70,3 +74,7 @@ int factory_session_send(const uint8_t *data, size_t size);
  * @return 0 on success, negative value on failure
  */
 int factory_session_receive(uint8_t *data, size_t *size);
+
+#ifdef __cplusplus
+}
+#endif

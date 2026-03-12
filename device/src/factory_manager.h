@@ -2,24 +2,31 @@
 
 #include <stdbool.h>
 
-/**
- * @brief Callback type for factory provisioning result
- * 
- * @param is_success true if provisioning succeeded, false otherwise
- */
-typedef void (*factory_manager_result_callback_t)(bool is_success);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
- * @brief Starts the factory provisioning process.
+ * @brief Run factory provisioning in a blocking loop.
  * 
- * This function initiates the factory provisioning workflow which handles
- * communication with the PC, receives factory data, and provisions the device.
+ * This function is intended to run an internal processing loop (typically a
+ * `while` loop) and does not return until provisioning finishes (success or
+ * failure).
+ * 
+ * Threading requirements:
+ * - This is a blocking function.
+ * - Call it from a dedicated worker thread, or
+ * - Use this function itself as the thread entry routine in your platform.
  *
- * The callback will be invoked upon completion:
- * - On success: The caller should perform a system reboot to apply provisioned data.
- * - On failure: The caller should resume normal device operation.
+ * Post-condition guidance:
+ * - On success (`true`): reboot or restart as required to apply provisioned
+ *   data.
+ * - On failure (`false`): resume normal runtime or retry per product policy.
  * 
- * @param callback Function to be called when provisioning completes
- * @return 0 on successful thread creation, negative error code on failure
+ * @return `true` if provisioning succeeded, otherwise `false`.
  */
-int factory_manager_start(factory_manager_result_callback_t callback);
+bool factory_manager_process(void);
+
+#ifdef __cplusplus
+}
+#endif

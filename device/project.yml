@@ -7,13 +7,13 @@
 
 :project:
   :use_exceptions: FALSE
-  :use_test_preprocessor: FALSE
+  :use_test_preprocessor: :none
   :use_auxiliary_dependencies: FALSE
   :build_root: test/build
 #  :release_build: TRUE
   :test_file_prefix: test_
   :which_ceedling: gem
-  :ceedling_version: 0.30.0
+  :ceedling_version: 1.0.1
   :default_tasks:
     - test:all
 
@@ -24,7 +24,7 @@
 #  :output: MyApp.out
 #  :use_assembly: FALSE
 
-:environment:
+:environment: []
 
 :extension:
   :executable: .out
@@ -32,8 +32,11 @@
 :paths:
   :test:
     - +:test/**
+    - -:test/build/**
     - -:test/support
   :source:
+    - src/**
+  :include:
     - src/**
   :support:
     - test/support
@@ -93,9 +96,8 @@
   :release: []
 
 :plugins:
-  :load_paths:
-    - "#{Ceedling.load_path}"
+  :load_paths: []
   :enabled:
-    - stdout_pretty_tests_report
+    - report_tests_pretty_stdout
     - module_generator
 ...

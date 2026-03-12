@@ -21,15 +21,20 @@ static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 }
 
 #define PACKET_BUFFER_SIZE 1024
-static factory_frame_assembler_context_t assembler_ctx = FACTORY_FRAME_ASSEMBLER_INIT(PACKET_BUFFER_SIZE);
-static factory_frame_fragmenter_context_t fragmenter_ctx = FACTORY_FRAME_FRAGMENTER_INIT(PACKET_BUFFER_SIZE);
+static uint8_t assembler_packet[PACKET_BUFFER_SIZE];
+static uint8_t fragmenter_packet[PACKET_BUFFER_SIZE];
+
+static factory_frame_assembler_context_t assembler_ctx =
+    FACTORY_FRAME_ASSEMBLER_INIT(assembler_packet);
+static factory_frame_fragmenter_context_t fragmenter_ctx =
+    FACTORY_FRAME_FRAGMENTER_INIT(fragmenter_packet);
 FACTORY_FRAME_DEFINE(frame);
 
 void setUp(void)
 {
     // Reset contexts before each test
     factory_frame_assembler_init(&assembler_ctx);
-    factory_frame_fragmenter_init(&fragmenter_ctx, PACKET_BUFFER_SIZE);
+    factory_frame_fragmenter_init(&fragmenter_ctx, sizeof(fragmenter_packet));
     factory_frame_init(frame);
 }
 
@@ -59,10 +64,10 @@ void test_factory_frame_assembler_process_invalid_arguments(void)
 
 void test_factory_frame_assembler_process_invalid_magic(void)
 {
-    frame->magic = 0xDEAD; // Invalid magic
+    factory_frame_set_magic(frame, 0xDEADu); // Invalid magic
     frame->type = FACTORY_FRAME_TYPE_SINGLE;
-    frame->size = 10;
-    frame->crc16 = crc16_ccitt((uint8_t *)frame + FACTORY_FRAME_HEADER_SIZE, 10);
+    factory_frame_set_size(frame, 10u);
+    factory_frame_set_crc16(frame, crc16_ccitt((uint8_t *)frame + FACTORY_FRAME_HEADER_SIZE, 10u));
 
     factory_frame_error_code_t err = factory_frame_assembler_process(&assembler_ctx, frame);
     TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_INVALID_MAGIC, err);
@@ -72,10 +77,10 @@ void test_factory_frame_assembler_process_invalid_magic(void)
 
 void test_factory_frame_assembler_process_crc_mismatch(void)
 {
-    frame->magic = FACTORY_FRAME_MAGIC;
+    factory_frame_set_magic(frame, FACTORY_FRAME_MAGIC);
     frame->type = FACTORY_FRAME_TYPE_SINGLE;
-    frame->size = 10;
-    frame->crc16 = 0x1234; // Invalid CRC
+    factory_frame_set_size(frame, 10u);
+    factory_frame_set_crc16(frame, 0x1234u); // Invalid CRC
 
     factory_frame_error_code_t err = factory_frame_assembler_process(&assembler_ctx, frame);
     TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_CRC_MISMATCH, err);
@@ -88,13 +93,13 @@ void test_factory_frame_assembler_process_single_frame(void)
     const char *test_data = "Hello, Factory Frame!";
     size_t data_len = strlen(test_data) + 1; // Include null terminator
 
-    factory_single_frame_t *single_frame = (factory_single_frame_t *)&framebase;
+    factory_single_frame_t *single_frame = (factory_single_frame_t *)frame;
     
-    single_frame->super.magic = FACTORY_FRAME_MAGIC;
+    factory_frame_set_magic(&single_frame->super, FACTORY_FRAME_MAGIC);
     single_frame->super.type = FACTORY_FRAME_TYPE_SINGLE;
-    single_frame->super.size = data_len;
+    factory_frame_set_size(&single_frame->super, (uint16_t)data_len);
     memcpy(single_frame->data, test_data, data_len);
-    single_frame->super.crc16 = crc16_ccitt(single_frame->data, data_len);
+    factory_frame_set_crc16(&single_frame->super, crc16_ccitt(single_frame->data, data_len));
 
     factory_frame_error_code_t err = factory_frame_assembler_process(&assembler_ctx, frame);
     TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_NONE, err);
@@ -106,13 +111,15 @@ void test_factory_frame_assembler_process_single_frame(void)
 
 void test_factory_frame_fragmenter_init(void)
 {
-    factory_frame_error_code_t err = factory_frame_fragmenter_init(&fragmenter_ctx, PACKET_BUFFER_SIZE);
+    factory_frame_error_code_t err = factory_frame_fragmenter_init(
+        &fragmenter_ctx,
+        sizeof(fragmenter_packet));
     TEST_ASSERT_EQUAL(FACTORY_FRAME_ERROR_NONE, err);
     TEST_ASSERT_FALSE(fragmenter_ctx.has_finished);
     TEST_ASSERT_FALSE(fragmenter_ctx.has_error);
     TEST_ASSERT_EQUAL(0, fragmenter_ctx.sequence);
     TEST_ASSERT_EQUAL(0, fragmenter_ctx.index);
-    TEST_ASSERT_EQUAL(PACKET_BUFFER_SIZE, fragmenter_ctx.packet_capacity);
+    TEST_ASSERT_EQUAL(sizeof(fragmenter_packet), fragmenter_ctx.packet_capacity);
 }
 
 void test_factory_frame_fragmenter_process_invalid_arguments(void)
