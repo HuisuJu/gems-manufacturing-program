@@ -275,6 +275,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
         for item, record in encoded_records:
             frame = self._build_command_frame(record)
+            self._log_raw_bytes("TX", frame)
 
             if not self._stream.write(frame):
                 return DispatchResult(
@@ -486,7 +487,18 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 )
                 continue
 
-            self._handle_rx_chunk(bytes(chunk))
+            raw_chunk = bytes(chunk)
+            self._log_raw_bytes("RX", raw_chunk)
+            self._handle_rx_chunk(raw_chunk)
+
+    def _log_raw_bytes(self, direction: str, payload: bytes) -> None:
+        """
+        Log raw serial payload in hexadecimal form.
+        """
+        Logger.write(
+            LogLevel.PROGRESS,
+            f"Thermostat raw {direction}: len={len(payload)} hex={payload.hex()}",
+        )
 
     def _handle_rx_chunk(self, chunk: bytes) -> None:
         """
@@ -511,5 +523,17 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 completed_lines.append(line)
 
         for line in completed_lines:
-            text = line.decode("utf-8", errors="replace")
+            text = self._decode_rx_line(line)
             Logger.write(LogLevel.PROGRESS, text)
+
+    def _decode_rx_line(self, line: bytes) -> str:
+        """
+        Decode one RX line for logs without garbled replacement glyphs.
+
+        - Normal UTF-8 text is returned as-is.
+        - Invalid byte sequences are escaped as \\xNN.
+        """
+        try:
+            return line.decode("utf-8")
+        except UnicodeDecodeError:
+            return line.decode("utf-8", errors="backslashreplace")
