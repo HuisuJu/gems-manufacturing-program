@@ -1,5 +1,5 @@
 {
-  "title": "Doorlock Factory Data",
+  "title": "GEMS Doorlock Factory Data",
   "required": [
     "serial_number",
     "manufactured_date",

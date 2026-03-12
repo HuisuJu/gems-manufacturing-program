@@ -1,5 +1,5 @@
 {
-  "title": "Thermostat Factory Data",
+  "title": "GEMS Thermostat Factory Data",
   "required": [
     "serial_number",
     "dac_cert",

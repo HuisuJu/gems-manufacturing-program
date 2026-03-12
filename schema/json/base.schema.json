@@ -1,26 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Base Matter Factory Data",
+  "title": "GEMS Factory Data Base Schema",
   "type": "object",
   "properties": {
     "serial_number": {
       "type": "string",
+      "maxLength": 64,
       "description": "Unique device serial number"
     },
 
     "manufactured_date": {
       "type": "string",
       "description": "Manufacturing date in YYYYMMDD format",
+      "maxLength": 8,
       "pattern": "^\\d{8}$"
     },
 
     "vendor_id": {
       "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
       "description": "Matter Vendor ID"
     },
 
     "product_id": {
       "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
       "description": "Matter Product ID"
     },
 
@@ -36,54 +42,72 @@
 
     "dac_cert": {
       "type": "string",
-      "description": "Device Attestation Certificate"
+      "contentEncoding": "base64",
+      "maxLength": 800,
+      "description": "Device Attestation Certificate (bytes, max 600)"
     },
 
     "dac_public_key": {
       "type": "string",
-      "description": "Device Attestation Public Key"
+      "contentEncoding": "base64",
+      "maxLength": 88,
+      "description": "Device Attestation Public Key (bytes, max 65)"
     },
 
     "dac_private_key": {
       "type": "string",
-      "description": "Device Attestation Private Key"
+      "contentEncoding": "base64",
+      "maxLength": 44,
+      "description": "Device Attestation Private Key (bytes, max 32)"
     },
 
     "pai_cert": {
       "type": "string",
-      "description": "Product Attestation Intermediate Certificate"
+      "contentEncoding": "base64",
+      "maxLength": 800,
+      "description": "Product Attestation Intermediate Certificate (bytes, max 600)"
     },
 
     "certification_declaration": {
       "type": "string",
-      "description": "Matter Certification Declaration"
+      "contentEncoding": "base64",
+      "maxLength": 684,
+      "description": "Matter Certification Declaration (bytes, max 512)"
     },
 
     "spake2p_passcode": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 99999999,
+      "maximum": 4294967295,
       "description": "Matter SPAKE2+ passcode"
     },
 
     "spake2p_salt": {
       "type": "string",
-      "description": "SPAKE2+ salt encoded as Base64"
+      "contentEncoding": "base64",
+      "maxLength": 44,
+      "description": "SPAKE2+ salt (bytes, max 32) encoded as Base64"
     },
 
     "spake2p_iteration_count": {
       "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
       "description": "Matter SPAKE2+ iteration count"
     },
 
     "spake2p_verifier": {
       "type": "string",
-      "description": "SPAKE2+ verifier encoded as Base64"
+      "contentEncoding": "base64",
+      "maxLength": 172,
+      "description": "SPAKE2+ verifier (bytes, max 128) encoded as Base64"
     },
 
     "onboarding_payload": {
       "type": "string",
-      "description": "Matter onboarding QR payload string beginning with MT:"
+      "contentEncoding": "base64",
+      "maxLength": 172,
+      "description": "Matter onboarding payload (bytes, max 128) encoded as Base64"
     }
   },
   "additionalProperties": false
