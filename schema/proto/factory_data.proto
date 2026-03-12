@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package factory.data;
+
+enum FactoryDataItem {
+  FACTORY_DATA_ITEM_UNSPECIFIED               = 0;
+
+  FACTORY_DATA_ITEM_SERIAL_NUMBER             = 1;
+  FACTORY_DATA_ITEM_MANUFACTURED_DATE         = 2;
+
+  FACTORY_DATA_ITEM_VENDOR_ID                 = 101;
+  FACTORY_DATA_ITEM_PRODUCT_ID                = 102;
+
+  FACTORY_DATA_ITEM_DAC_CERT                  = 201;
+  FACTORY_DATA_ITEM_DAC_PUBLIC_KEY            = 202;
+  FACTORY_DATA_ITEM_DAC_PRIVATE_KEY           = 203;
+  FACTORY_DATA_ITEM_PAI_CERT                  = 204;
+  FACTORY_DATA_ITEM_CERTIFICATION_DECLARATION = 205;
+
+  FACTORY_DATA_ITEM_ONBOARDING_PAYLOAD        = 301;
+  FACTORY_DATA_ITEM_SPAKE2P_PASSCODE          = 302;
+  FACTORY_DATA_ITEM_SPAKE2P_SALT              = 303;
+  FACTORY_DATA_ITEM_SPAKE2P_ITERATION_COUNT   = 304;
+  FACTORY_DATA_ITEM_SPAKE2P_VERIFIER          = 305;
+}
+
+message FactoryData {
+  optional string serial_number               = 1;
+  optional string manufactured_date           = 2;
+
+  optional uint32 vendor_id                   = 101;
+  optional uint32 product_id                  = 102;
+
+  optional bytes dac_cert                     = 201;
+  optional bytes dac_public_key               = 202;
+  optional bytes dac_private_key              = 203;
+  optional bytes pai_cert                     = 204;
+  optional bytes certification_declaration    = 205;
+
+  optional bytes onboarding_payload           = 301;
+  optional uint32 spake2p_passcode            = 302;
+  optional bytes spake2p_salt                 = 303;
+  optional uint32 spake2p_iteration_count     = 304;
+  optional bytes spake2p_verifier             = 305;
+}

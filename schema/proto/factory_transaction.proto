@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package factory.transaction;
+
+import "factory_command.proto";
+
+enum FactoryStatusCode {
+  FACTORY_STATUS_CODE_UNSPECIFIED         = 0;
+  FACTORY_STATUS_CODE_OK                  = 1;
+  FACTORY_STATUS_CODE_INVALID_TRANSACTION = 2;
+  FACTORY_STATUS_CODE_INVALID_ARGUMENT    = 3;
+  FACTORY_STATUS_CODE_INVALID_ITEM        = 4;
+  FACTORY_STATUS_CODE_INVALID_DATA        = 5;
+  FACTORY_STATUS_CODE_INTERNAL_ERROR      = 6;
+  FACTORY_STATUS_CODE_UNSUPPORTED         = 7;
+}
+
+message FactoryRequest {
+  uint32 transaction_id = 1;
+
+  oneof transaction {
+    factory.command.FactoryReadRequest read   = 100;
+    factory.command.FactoryWriteRequest write = 101;
+  }
+}
+
+message FactoryResponse {
+  uint32 transaction_id = 1;
+  FactoryStatusCode status = 2;
+
+  oneof transaction {
+    factory.command.FactoryReadResponse read   = 100;
+    factory.command.FactoryWriteResponse write = 101;
+  }
+}

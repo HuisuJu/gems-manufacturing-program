@@ -1,24 +1,3 @@
-# nanopb options for factory_command.proto
+factory.command.FactoryReadRequest.items max_count:15
 
-# String field size limits (adjust based on your requirements)
-*.error_message max_size:128
-
-# Array size limits
-ReadRequest.system_fields max_count:16
-ReadRequest.matter_fields max_count:16
-ReadRequest.device_fields max_count:32
-ReadResponse.system_data max_count:16
-ReadResponse.matter_data max_count:16
-ReadResponse.device_data max_count:32
-WriteRequest.system_data max_count:16
-WriteRequest.matter_data max_count:16
-WriteRequest.device_data max_count:32
-WriteResponse.written_system_fields max_count:16
-WriteResponse.failed_system_fields max_count:16
-WriteResponse.written_matter_fields max_count:16
-WriteResponse.failed_matter_fields max_count:16
-WriteResponse.written_device_fields max_count:32
-WriteResponse.failed_device_fields max_count:32
-
-# DeviceFieldDataEntry data size limit
-DeviceFieldDataEntry.data max_size:1024
+factory.command.FactoryWriteResponse.items max_count:15

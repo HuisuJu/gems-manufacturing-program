@@ -1,0 +1,19 @@
+factory.data.FactoryData.serial_number               max_size:64
+
+factory.data.FactoryData.manufactured_date           max_size:8
+
+factory.data.FactoryData.dac_cert                    max_size:600
+
+factory.data.FactoryData.dac_public_key              max_size:65
+
+factory.data.FactoryData.dac_private_key             max_size:32
+
+factory.data.FactoryData.pai_cert                    max_size:600
+
+factory.data.FactoryData.certification_declaration   max_size:512
+
+factory.data.FactoryData.onboarding_payload          max_size:128
+
+factory.data.FactoryData.spake2p_salt                max_size:32
+
+factory.data.FactoryData.spake2p_verifier            max_size:128

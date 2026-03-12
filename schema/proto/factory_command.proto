@@ -1,129 +1,21 @@
 syntax = "proto3";
 
-package factory;
+package factory.command;
 
-import "factory_system_data.proto";
-import "factory_matter_data.proto";
+import "factory_data.proto";
 
-// -----------------------------------------------------------------------------
-// Command types
-// -----------------------------------------------------------------------------
-enum CommandType {
-  COMMAND_TYPE_UNSPECIFIED = 0;
-  COMMAND_TYPE_READ        = 1;
-  COMMAND_TYPE_WRITE       = 2;
+message FactoryReadRequest {
+  repeated factory.data.FactoryDataItem items = 1;
 }
 
-// -----------------------------------------------------------------------------
-// Status codes
-// -----------------------------------------------------------------------------
-enum StatusCode {
-  STATUS_CODE_UNSPECIFIED      = 0;
-  STATUS_CODE_OK               = 1;
-  STATUS_CODE_INVALID_REQUEST  = 2;
-  STATUS_CODE_UNSUPPORTED      = 3;
-  STATUS_CODE_NOT_FOUND        = 4;
-  STATUS_CODE_INTERNAL_ERROR   = 5;
-  STATUS_CODE_WRITE_FAILED     = 6;
-  STATUS_CODE_READ_FAILED      = 7;
+message FactoryReadResponse {
+  factory.data.FactoryData data = 1;
 }
 
-// -----------------------------------------------------------------------------
-// Device-specific field data entry (model-owned field namespace)
-// -----------------------------------------------------------------------------
-message DeviceFieldDataEntry {
-  uint32 field_id = 1;
-  bytes data = 2;
+message FactoryWriteRequest {
+  factory.data.FactoryData data = 1;
 }
 
-// -----------------------------------------------------------------------------
-// READ command: PC requests specific fields, device responds with data
-// -----------------------------------------------------------------------------
-message ReadRequest {
-  // List of system fields to read
-  repeated SystemFieldType system_fields = 1;
-
-  // List of Matter fields to read
-  repeated MatterFieldType matter_fields = 2;
-
-  // List of device-specific field IDs to read
-  repeated uint32 device_fields = 3;
-}
-
-message ReadResponse {
-  // Status code for the read operation
-  StatusCode status = 1;
-
-  // Optional error message
-  string error_message = 2;
-
-  // System field values (only requested fields are populated)
-  repeated SystemFieldDataEntry system_data = 3;
-
-  // Matter field values (only requested fields are populated)
-  repeated MatterFieldDataEntry matter_data = 4;
-
-  // Device-specific field values
-  repeated DeviceFieldDataEntry device_data = 5;
-}
-
-// -----------------------------------------------------------------------------
-// WRITE command: PC sends data, device writes and returns success/failure
-// -----------------------------------------------------------------------------
-message WriteRequest {
-  // System field values to write
-  repeated SystemFieldDataEntry system_data = 1;
-
-  // Matter field values to write
-  repeated MatterFieldDataEntry matter_data = 2;
-
-  // Device-specific field values to write
-  repeated DeviceFieldDataEntry device_data = 3;
-}
-
-message WriteResponse {
-  // Status code for the write operation
-  StatusCode status = 1;
-
-  // Optional error message
-  string error_message = 2;
-
-  // Successfully written system fields
-  repeated SystemFieldType written_system_fields = 3;
-
-  // Failed system fields
-  repeated SystemFieldType failed_system_fields = 4;
-
-  // Successfully written Matter fields
-  repeated MatterFieldType written_matter_fields = 5;
-
-  // Failed Matter fields
-  repeated MatterFieldType failed_matter_fields = 6;
-
-  // Successfully written device-specific field IDs
-  repeated uint32 written_device_fields = 7;
-
-  // Failed device-specific field IDs
-  repeated uint32 failed_device_fields = 8;
-}
-
-// -----------------------------------------------------------------------------
-// Top-level request/response envelopes
-// -----------------------------------------------------------------------------
-message FactoryRequest {
-  CommandType command = 1;
-
-  oneof payload {
-    ReadRequest  read  = 2;
-    WriteRequest write = 3;
-  }
-}
-
-message FactoryResponse {
-  CommandType command = 1;
-
-  oneof payload {
-    ReadResponse  read  = 2;
-    WriteResponse write = 3;
-  }
+message FactoryWriteResponse {
+  repeated factory.data.FactoryDataItem items = 1;
 }

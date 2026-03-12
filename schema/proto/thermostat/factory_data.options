@@ -1,4 +1,0 @@
-# nanopb options for thermostat/factory_data.proto
-
-# No specific size limits needed for thermostat as it uses primitive types
-# int32 fields don't need size limits

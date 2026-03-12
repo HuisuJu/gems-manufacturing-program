@@ -1,5 +1,0 @@
-# nanopb options for doorlock/factory_data.proto
-
-# Doorlock-specific field size limits
-DoorlockSpecificData.motor_calibration max_size:256
-DoorlockSpecificData.nfc_tag_uid max_size:16
