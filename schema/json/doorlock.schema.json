@@ -7,11 +7,13 @@
     "dac_public_key",
     "dac_private_key",
     "pai_cert",
-    "certification_declaration",
+    "cd_cert",
     "spake2p_passcode",
     "spake2p_salt",
     "spake2p_iteration_count",
-    "spake2p_verifier",
+    "spake2p_verifier_w0",
+    "spake2p_verifier_L",
+    "discriminator",
     "onboarding_payload"
   ],
   "properties": {
@@ -38,6 +40,12 @@
     "spake2p_iteration_count": {
       "const": 1000,
       "description": "Matter SPAKE2+ iteration count"
+    },
+
+    "spake2p_salt": {
+      "minLength": 32,
+      "maxLength": 32,
+      "description": "SPAKE2+ salt hex length for Doorlock model (16 bytes)"
     }
   }
 }

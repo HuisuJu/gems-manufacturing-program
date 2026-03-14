@@ -14,19 +14,21 @@ Where record is:
 Expected input format is a flat factory-data dictionary such as:
 
     {
-        "certification_declaration": "<base64>",
-        "pai_cert": "<base64>",
-        "dac_cert": "<base64>",
-        "dac_private_key": "<base64>",
-        "dac_public_key": "<base64>",
+        "cd_cert": "<hex>",
+        "pai_cert": "<hex>",
+        "dac_cert": "<hex>",
+        "dac_private_key": "<hex>",
+        "dac_public_key": "<hex>",
         "spake2p_iteration_count": 1000,
         "spake2p_passcode": 88404584,
-        "spake2p_salt": "<base64>",
-        "spake2p_verifier": "<base64>",
+        "spake2p_salt": "<hex>",
+        "spake2p_verifier_w0": "<hex>",
+        "spake2p_verifier_L": "<hex>",
         ...
     }
 
-Binary values are decoded from base64 strings.
+    Binary values are decoded from hex strings.
+    Legacy base64 is accepted for compatibility.
 Integer values are encoded as 4-byte little-endian unsigned integers.
 
 The combined SPAKE2+ verifier is split as:
@@ -38,8 +40,6 @@ complete newline-terminated line received from the device.
 """
 
 from __future__ import annotations
-
-import base64
 
 import threading
 
@@ -92,37 +92,37 @@ class ThermostatDispatcher(ProvisionDispatcher):
     _ITEMS: tuple[_DispatchItem, ...] = (
         _DispatchItem(
             index=0,
-            key_candidates=("cd", "certification_declaration"),
+            key_candidates=("cd_cert", "cd", "certification_declaration"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="Certification Declaration",
         ),
         _DispatchItem(
             index=1,
             key_candidates=("pai_cert", "pai_certificate"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="PAI certificate",
         ),
         _DispatchItem(
             index=2,
             key_candidates=("dac_cert", "dac_certificate"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="DAC certificate",
         ),
         _DispatchItem(
             index=3,
             key_candidates=("dac_private_key", "dac_priv", "dac_key"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="DAC private key",
         ),
         _DispatchItem(
             index=4,
             key_candidates=("dac_public_key", "dac_pub"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="DAC public key",
         ),
         _DispatchItem(
@@ -147,21 +147,21 @@ class ThermostatDispatcher(ProvisionDispatcher):
             index=7,
             key_candidates=("salt", "spake2p_salt"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="SPAKE2+ salt",
         ),
         _DispatchItem(
             index=8,
-            key_candidates=("verifier_w0",),
+            key_candidates=("spake2p_verifier_w0", "verifier_w0"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="SPAKE2+ verifier W0",
         ),
         _DispatchItem(
             index=9,
-            key_candidates=("verifier_l",),
+            key_candidates=("spake2p_verifier_L", "verifier_l"),
             required=True,
-            kind="base64_bytes",
+            kind="binary_bytes",
             description="SPAKE2+ verifier L",
         ),
     )
@@ -335,19 +335,31 @@ class ThermostatDispatcher(ProvisionDispatcher):
 
     def _expand_combined_verifier(self, payload_source: dict[str, Any]) -> None:
         """
-        Expand the combined SPAKE2+ verifier into W0 and L.
+        Ensure split SPAKE2+ verifier fields are available.
 
-        The input JSON contains a single field:
+        The preferred input JSON contains:
+            - spake2p_verifier_w0
+            - spake2p_verifier_L
+
+        For backward compatibility, a legacy combined field is also accepted:
             - spake2p_verifier
 
-        This dispatcher converts it into:
-            - verifier_w0 (first 32 bytes)
-            - verifier_l  (remaining 65 bytes)
+        This dispatcher derives:
+            - spake2p_verifier_w0 (first 32 bytes)
+            - spake2p_verifier_L  (remaining 65 bytes)
 
-        The derived values are stored as base64 strings so they can be handled
-        by the normal base64_bytes path.
+        The derived values are stored as hex strings so they can be handled by
+        the normal binary_bytes path.
         """
-        if "verifier_w0" in payload_source and "verifier_l" in payload_source:
+        has_w0 = self._find_value(
+            payload_source,
+            ("spake2p_verifier_w0", "verifier_w0"),
+        ) is not None
+        has_l = self._find_value(
+            payload_source,
+            ("spake2p_verifier_L", "verifier_l"),
+        ) is not None
+        if has_w0 and has_l:
             return
 
         combined = self._find_value(payload_source, ("spake2p_verifier", "verifier"))
@@ -356,7 +368,7 @@ class ThermostatDispatcher(ProvisionDispatcher):
                 "Required thermostat factory data is missing: SPAKE2+ verifier."
             )
 
-        verifier = self._decode_base64_bytes(combined, "SPAKE2+ verifier")
+        verifier = self._decode_binary_bytes(combined, "SPAKE2+ verifier")
 
         if len(verifier) != self._SPAKE2P_VERIFIER_SIZE:
             raise ThermostatDispatcherConfigurationError(
@@ -366,15 +378,15 @@ class ThermostatDispatcher(ProvisionDispatcher):
         w0 = verifier[: self._SPAKE2P_W0_SIZE]
         l_value = verifier[self._SPAKE2P_W0_SIZE :]
 
-        payload_source["verifier_w0"] = base64.b64encode(w0).decode("ascii")
-        payload_source["verifier_l"] = base64.b64encode(l_value).decode("ascii")
+        payload_source["spake2p_verifier_w0"] = w0.hex().upper()
+        payload_source["spake2p_verifier_L"] = l_value.hex().upper()
 
     def _encode_value(self, item: _DispatchItem, value: Any) -> bytes:
         """
         Encode one thermostat item payload.
         """
-        if item.kind == "base64_bytes":
-            return self._decode_base64_bytes(value, item.description)
+        if item.kind == "binary_bytes":
+            return self._decode_binary_bytes(value, item.description)
 
         if item.kind == "u32":
             return self._encode_u32(value, item.description)
@@ -383,9 +395,13 @@ class ThermostatDispatcher(ProvisionDispatcher):
             f"Unsupported thermostat item encoding kind: {item.kind}"
         )
 
-    def _decode_base64_bytes(self, value: Any, field_name: str) -> bytes:
+    def _decode_binary_bytes(self, value: Any, field_name: str) -> bytes:
         """
-        Decode one bytes-like or base64-string value into raw bytes.
+        Decode one bytes-like, byte-array, or encoded-string value into bytes.
+
+        Priority for string inputs:
+        1) hex string
+        2) legacy base64 string (compatibility)
         """
         if isinstance(value, bytes):
             return value
@@ -396,18 +412,34 @@ class ThermostatDispatcher(ProvisionDispatcher):
         if isinstance(value, memoryview):
             return bytes(value)
 
+        if isinstance(value, list):
+            try:
+                return bytes(value)
+            except Exception as exc:
+                raise ThermostatDispatcherConfigurationError(
+                    f"The value for '{field_name}' is not a valid byte array."
+                ) from exc
+
         if isinstance(value, str):
             normalized = "".join(value.strip().split())
 
             try:
+                return bytes.fromhex(normalized)
+            except Exception:
+                pass
+
+            try:
+                import base64
+
                 return base64.b64decode(normalized, validate=True)
             except Exception as exc:
                 raise ThermostatDispatcherConfigurationError(
-                    f"The value for '{field_name}' is not valid base64."
+                    f"The value for '{field_name}' is neither valid hex nor base64."
                 ) from exc
 
         raise ThermostatDispatcherConfigurationError(
-            f"The value for '{field_name}' must be bytes-like or a base64 string."
+            f"The value for '{field_name}' must be bytes-like, byte-array, "
+            "or encoded string."
         )
 
     def _encode_u32(self, value: Any, field_name: str) -> bytes:

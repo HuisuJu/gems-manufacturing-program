@@ -8,8 +8,6 @@ simulates a provisioning delay, and returns a synthetic DispatchResult.
 
 from __future__ import annotations
 
-import base64
-
 import json
 
 import time
@@ -214,17 +212,18 @@ class EmulatorDispatcher(ProvisionDispatcher):
         """
         Build a log-friendly payload representation.
 
-        Binary fields are decoded from Base64 and rendered as uppercase
+        Binary fields are decoded from hex strings and rendered as uppercase
         contiguous hex strings, e.g. "308201E9...".
         """
-        binary_base64_fields = {
-            "certification_declaration",
+        binary_encoded_fields = {
+            "cd_cert",
             "dac_cert",
             "dac_private_key",
             "dac_public_key",
             "pai_cert",
             "spake2p_salt",
-            "spake2p_verifier",
+            "spake2p_verifier_w0",
+            "spake2p_verifier_L",
         }
 
         converted: dict[str, Any] = {}
@@ -233,12 +232,23 @@ class EmulatorDispatcher(ProvisionDispatcher):
                 converted[key] = value.hex().upper()
                 continue
 
-            if key in binary_base64_fields and isinstance(value, str):
+            if key == "spake2p_salt" and isinstance(value, list):
                 try:
-                    converted[key] = base64.b64decode(
-                        value,
-                        validate=True,
-                    ).hex().upper()
+                    converted[key] = bytes(value).hex().upper()
+                except Exception as exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "에뮬레이터 로그 포맷 변환 중 오류가 발생했습니다. "
+                        "해당 필드는 원본 값으로 표시됩니다. "
+                        f"field={key} ({type(exc).__name__}: {exc})",
+                    )
+                    converted[key] = value
+                continue
+
+            if key in binary_encoded_fields and isinstance(value, str):
+                try:
+                    normalized = "".join(value.strip().split())
+                    converted[key] = bytes.fromhex(normalized).hex().upper()
                 except Exception as exc:
                     Logger.write(
                         LogLevel.ALERT,

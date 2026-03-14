@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from typing import Any, AbstractSet, Mapping
+from typing import AbstractSet, Any
 
-from .base import Retriever, RetrieverError
+from ..retriever import Retriever
+
+from ..schema import FactoryDataSchema
 
 
 class ManufacturingDataRetriever(Retriever):
@@ -28,7 +30,7 @@ class ManufacturingDataRetriever(Retriever):
         """Return fields this retriever can provide."""
         return self._SUPPORTED_FIELDS
 
-    def fetch(self, schema: Mapping[str, Any]) -> dict[str, Any]:
+    def fetch(self, schema: FactoryDataSchema) -> dict[str, Any]:
         """Fetch requested manufacturing fields."""
         target_fields = self.target_fields(schema)
         if not target_fields:
@@ -40,6 +42,10 @@ class ManufacturingDataRetriever(Retriever):
             json["manufactured_date"] = self._generate_manufactured_date()
 
         return json
+
+    def report(self, is_success: bool) -> None:
+        """No-op report hook."""
+        _ = is_success
 
     def _generate_manufactured_date(self) -> str:
         """Return current date in YYYYMMDD format."""

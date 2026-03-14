@@ -7,8 +7,6 @@ factory data payload in the report output for now.
 
 from __future__ import annotations
 
-import base64
-
 import json
 
 from datetime import datetime, timezone
@@ -163,14 +161,15 @@ class ProvisionReporter:
 
         Binary fields are rendered as uppercase contiguous hex strings.
         """
-        binary_base64_fields = {
-            "certification_declaration",
+        binary_encoded_fields = {
+            "cd_cert",
             "dac_cert",
             "dac_private_key",
             "dac_public_key",
             "pai_cert",
             "spake2p_salt",
-            "spake2p_verifier",
+            "spake2p_verifier_w0",
+            "spake2p_verifier_L",
         }
 
         converted: dict[str, Any] = {}
@@ -179,12 +178,23 @@ class ProvisionReporter:
                 converted[key] = value.hex().upper()
                 continue
 
-            if key in binary_base64_fields and isinstance(value, str):
+            if key == "spake2p_salt" and isinstance(value, list):
                 try:
-                    converted[key] = base64.b64decode(
-                        value,
-                        validate=True,
-                    ).hex().upper()
+                    converted[key] = bytes(value).hex().upper()
+                except Exception as exc:
+                    Logger.write(
+                        LogLevel.ALERT,
+                        "리포트 injected_data 변환 중 오류가 발생했습니다. "
+                        "해당 필드는 원본 값으로 저장됩니다. "
+                        f"field={key} ({type(exc).__name__}: {exc})",
+                    )
+                    converted[key] = value
+                continue
+
+            if key in binary_encoded_fields and isinstance(value, str):
+                try:
+                    normalized = "".join(value.strip().split())
+                    converted[key] = bytes.fromhex(normalized).hex().upper()
                 except Exception as exc:
                     Logger.write(
                         LogLevel.ALERT,

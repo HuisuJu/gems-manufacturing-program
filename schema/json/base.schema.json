@@ -42,37 +42,39 @@
 
     "dac_cert": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 800,
-      "description": "Device Attestation Certificate (bytes, max 600)"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "maxLength": 1400,
+      "description": "Device Attestation Certificate as hex string (bytes, max 700)"
     },
 
     "dac_public_key": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 88,
-      "description": "Device Attestation Public Key (bytes, max 65)"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "minLength": 130,
+      "maxLength": 130,
+      "description": "Device Attestation Public Key as hex string (bytes, 65)"
     },
 
     "dac_private_key": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 44,
-      "description": "Device Attestation Private Key (bytes, max 32)"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "minLength": 64,
+      "maxLength": 64,
+      "description": "Device Attestation Private Key as hex string (bytes, 32)"
     },
 
     "pai_cert": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 800,
-      "description": "Product Attestation Intermediate Certificate (bytes, max 600)"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "maxLength": 1400,
+      "description": "Product Attestation Intermediate Certificate as hex string (bytes, max 700)"
     },
 
-    "certification_declaration": {
+    "cd_cert": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 684,
-      "description": "Matter Certification Declaration (bytes, max 512)"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "maxLength": 1024,
+      "description": "Matter Certification Declaration as hex string (bytes, max 512)"
     },
 
     "spake2p_passcode": {
@@ -84,9 +86,18 @@
 
     "spake2p_salt": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 44,
-      "description": "SPAKE2+ salt (bytes, max 32) encoded as Base64"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "anyOf": [
+        {
+          "minLength": 32,
+          "maxLength": 32
+        },
+        {
+          "minLength": 64,
+          "maxLength": 64
+        }
+      ],
+      "description": "SPAKE2+ salt as hex string (16 or 32 bytes)"
     },
 
     "spake2p_iteration_count": {
@@ -96,18 +107,33 @@
       "description": "Matter SPAKE2+ iteration count"
     },
 
-    "spake2p_verifier": {
+    "spake2p_verifier_w0": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 172,
-      "description": "SPAKE2+ verifier (bytes, max 128) encoded as Base64"
+      "pattern": "^[0-9A-Fa-f]+$",
+      "minLength": 64,
+      "maxLength": 64,
+      "description": "SPAKE2+ verifier W0 as hex string (bytes, 32)"
+    },
+
+    "spake2p_verifier_L": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]+$",
+      "minLength": 130,
+      "maxLength": 130,
+      "description": "SPAKE2+ verifier L as hex string (bytes, 65)"
+    },
+
+    "discriminator": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4095,
+      "description": "Matter discriminator"
     },
 
     "onboarding_payload": {
       "type": "string",
-      "contentEncoding": "base64",
-      "maxLength": 172,
-      "description": "Matter onboarding payload (bytes, max 128) encoded as Base64"
+      "maxLength": 100,
+      "description": "Matter onboarding payload string"
     }
   },
   "additionalProperties": false

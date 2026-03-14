@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, AbstractSet, Mapping
+from typing import AbstractSet, Any
 
-from .base import Retriever
+from ..retriever import Retriever
+
+from ..schema import FactoryDataSchema
 
 
 class DeviceIdentityRetriever(Retriever):
@@ -26,7 +28,7 @@ class DeviceIdentityRetriever(Retriever):
         """Return fields this retriever can provide."""
         return self._SUPPORTED_FIELDS
 
-    def fetch(self, schema: Mapping[str, Any]) -> dict[str, Any]:
+    def fetch(self, schema: FactoryDataSchema) -> dict[str, Any]:
         """Fetch requested device identity fields."""
         target_fields = self.target_fields(schema)
         if not target_fields:
@@ -38,6 +40,10 @@ class DeviceIdentityRetriever(Retriever):
             json["serial_number"] = self._generate_serial_number()
 
         return json
+
+    def report(self, is_success: bool) -> None:
+        """No-op report hook."""
+        _ = is_success
 
     def _generate_serial_number(self) -> str:
         """Generate serial number string."""

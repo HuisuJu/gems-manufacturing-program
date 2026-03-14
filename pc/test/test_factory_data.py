@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import base64
 import json
+
 from pathlib import Path
 
 import pytest
+
 from cryptography import x509
+
 from cryptography.hazmat.primitives import serialization
 
 from factory_data import (
@@ -96,11 +98,28 @@ def _make_schema_dir(tmp_path: Path) -> Path:
             "dac_public_key": {"type": "string"},
             "dac_private_key": {"type": "string"},
             "pai_cert": {"type": "string"},
-            "certification_declaration": {"type": "string"},
+            "cd_cert": {"type": "string"},
+            "discriminator": {"type": "integer"},
             "spake2p_passcode": {"type": "integer"},
-            "spake2p_salt": {"type": "string"},
+            "spake2p_salt": {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]+$",
+                "minLength": 64,
+                "maxLength": 64,
+            },
             "spake2p_iteration_count": {"type": "integer"},
-            "spake2p_verifier": {"type": "string"},
+            "spake2p_verifier_w0": {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]+$",
+                "minLength": 64,
+                "maxLength": 64,
+            },
+            "spake2p_verifier_L": {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]+$",
+                "minLength": 130,
+                "maxLength": 130,
+            },
             "onboarding_payload": {"type": "string"},
         },
         "additionalProperties": False,
@@ -115,11 +134,13 @@ def _make_schema_dir(tmp_path: Path) -> Path:
             "dac_public_key",
             "dac_private_key",
             "pai_cert",
-            "certification_declaration",
+            "cd_cert",
+            "discriminator",
             "spake2p_passcode",
             "spake2p_salt",
             "spake2p_iteration_count",
-            "spake2p_verifier",
+            "spake2p_verifier_w0",
+            "spake2p_verifier_L",
             "onboarding_payload",
         ],
         "properties": {
@@ -132,16 +153,21 @@ def _make_schema_dir(tmp_path: Path) -> Path:
     }
 
     _write_text(schema_dir / "base.schema.json", json.dumps(base_schema, indent=2))
-    _write_text(schema_dir / "doorlock.schema.json", json.dumps(doorlock_schema, indent=2))
+    _write_text(
+        schema_dir / "doorlock.schema.json",
+        json.dumps(doorlock_schema, indent=2),
+    )
     return schema_root
 
 
 @pytest.fixture
+
 def schema_dir(tmp_path: Path) -> Path:
     return _make_schema_dir(tmp_path)
 
 
 @pytest.fixture
+
 def dac_dir(tmp_path: Path) -> Path:
     d = tmp_path / "dac"
     d.mkdir()
@@ -153,6 +179,7 @@ def dac_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+
 def pai_file(tmp_path: Path) -> Path:
     path = tmp_path / "pai.pem"
     _write_text(path, PAI_CERT_PEM)
@@ -160,6 +187,7 @@ def pai_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+
 def cd_file(tmp_path: Path) -> Path:
     path = tmp_path / "cd.der"
     _write_bytes(path, CD_DER_BYTES)
@@ -220,15 +248,32 @@ def test_onboarding_retriever_fetch(schema_dir: Path):
     data = MatterOnboardingDataRetriever().fetch(schema)
 
     assert "spake2p_passcode" in data
+    assert "discriminator" in data
     assert "spake2p_salt" in data
     assert "spake2p_iteration_count" in data
-    assert "spake2p_verifier" in data
+    assert "spake2p_verifier_w0" in data
+    assert "spake2p_verifier_L" in data
     assert "onboarding_payload" in data
 
     assert isinstance(data["spake2p_passcode"], int)
+    assert isinstance(data["discriminator"], int)
+    assert 0 <= data["discriminator"] <= 4095
     assert isinstance(data["spake2p_salt"], str)
+    assert len(data["spake2p_salt"]) == 64
+    assert all(char in "0123456789ABCDEF" for char in data["spake2p_salt"])
     assert data["spake2p_iteration_count"] == 1000
-    assert isinstance(data["spake2p_verifier"], str)
+    assert isinstance(data["spake2p_verifier_w0"], str)
+    assert len(data["spake2p_verifier_w0"]) == 64
+    assert all(
+        char in "0123456789ABCDEF"
+        for char in data["spake2p_verifier_w0"]
+    )
+    assert isinstance(data["spake2p_verifier_L"], str)
+    assert len(data["spake2p_verifier_L"]) == 130
+    assert all(
+        char in "0123456789ABCDEF"
+        for char in data["spake2p_verifier_L"]
+    )
     assert data["onboarding_payload"].startswith("MT:")
 
 
@@ -301,18 +346,23 @@ def test_provider_pull_and_report(
     assert "dac_public_key" in data
     assert "dac_private_key" in data
     assert "pai_cert" in data
-    assert "certification_declaration" in data
+    assert "cd_cert" in data
     assert "spake2p_passcode" in data
+    assert "discriminator" in data
     assert "spake2p_salt" in data
     assert "spake2p_iteration_count" in data
-    assert "spake2p_verifier" in data
+    assert "spake2p_verifier_w0" in data
+    assert "spake2p_verifier_L" in data
     assert "onboarding_payload" in data
 
     assert isinstance(data["dac_cert"], str)
     assert isinstance(data["dac_public_key"], str)
     assert isinstance(data["dac_private_key"], str)
     assert isinstance(data["pai_cert"], str)
-    assert isinstance(data["certification_declaration"], str)
+    assert isinstance(data["cd_cert"], str)
+    assert isinstance(data["spake2p_salt"], str)
+    assert isinstance(data["spake2p_verifier_w0"], str)
+    assert isinstance(data["spake2p_verifier_L"], str)
     assert data["onboarding_payload"].startswith("MT:")
 
     provider.report(is_success=True)

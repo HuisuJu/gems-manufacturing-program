@@ -6,11 +6,13 @@
     "dac_public_key",
     "dac_private_key",
     "pai_cert",
-    "certification_declaration",
+    "cd_cert",
     "spake2p_passcode",
     "spake2p_salt",
     "spake2p_iteration_count",
-    "spake2p_verifier",
+    "spake2p_verifier_w0",
+    "spake2p_verifier_L",
+    "discriminator",
     "onboarding_payload"
   ],
   "properties": {
@@ -21,7 +23,7 @@
 
     "product_id": {
       "const": 8864,
-      "description": "Temporary Matter Product ID for Thermostat (0x22C1)"
+      "description": "Temporary Matter Product ID for Thermostat (0x22A0)"
     },
 
     "custom_flow": {
@@ -37,6 +39,12 @@
     "spake2p_iteration_count": {
       "const": 1000,
       "description": "Matter SPAKE2+ iteration count"
+    },
+
+    "spake2p_salt": {
+      "minLength": 32,
+      "maxLength": 32,
+      "description": "SPAKE2+ salt hex length for Thermostat model (16 bytes)"
     }
   }
 }

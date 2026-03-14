@@ -20,7 +20,7 @@ from thermostat import ThermostatDispatcher
 
 from factory_data import FactoryDataProvider
 
-from factory_data.retriever import (
+from factory_data.retrievers import (
     DeviceIdentityRetriever,
     ManufacturingDataRetriever,
     MatterAttestationDataRetriever,
