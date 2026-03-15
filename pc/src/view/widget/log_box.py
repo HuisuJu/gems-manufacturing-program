@@ -7,18 +7,11 @@ import customtkinter as ctk
 from logger import Logger, LogRecord
 
 
-class LogBoxView(ctk.CTkFrame):
-    """
-    Display live log records in a scrollable text box.
-
-    The view reflects the logger state and appends newly published records in
-    real time.
-    """
+class LogBoxWidget(ctk.CTkFrame):
+    """Show live logs in a scrollable text box."""
 
     def __init__(self, parent: ctk.CTkFrame, **kwargs) -> None:
-        """
-        Initialize the log box view.
-        """
+        """Initialize the log box."""
         super().__init__(parent, **kwargs)
 
         self._autoscroll = True
@@ -49,26 +42,14 @@ class LogBoxView(ctk.CTkFrame):
             "disable_autoscroll": lambda: self.set_autoscroll(False),
         }
 
-        self._load_existing_records()
         Logger.subscribe(self.print)
 
-    def _load_existing_records(self) -> None:
-        """
-        Load retained logger records into the text box.
-        """
-        for record in Logger.get_records():
-            self._append_record(record)
-
     def print(self, record: LogRecord) -> None:
-        """
-        Receive a newly accepted log record from the logger.
-        """
+        """Handle a new log record from Logger."""
         self.after(0, self._append_record, record)
 
     def _append_record(self, record: LogRecord) -> None:
-        """
-        Append a log record to the text box.
-        """
+        """Append one log line."""
         timestamp = record.timestamp.strftime("%H:%M:%S")
         line = f"[{timestamp}] [{record.level.name}] {record.message}\n"
 
@@ -80,36 +61,25 @@ class LogBoxView(ctk.CTkFrame):
             self.textbox.see("end")
 
     def clear(self) -> None:
-        """
-        Clear the visible text box content only.
-        """
+        """Clear visible log text."""
         self.textbox.configure(state="normal")
         self.textbox.delete("1.0", "end")
         self.textbox.configure(state="disabled")
 
     def reload(self) -> None:
-        """
-        Reload the visible content from the current logger state.
-        """
+        """Reload current widget content (same as clear)."""
         self.clear()
-        self._load_existing_records()
 
     def set_autoscroll(self, enabled: bool) -> None:
-        """
-        Enable or disable automatic scrolling.
-        """
+        """Enable or disable auto-scroll."""
         self._autoscroll = enabled
 
     def get_autoscroll(self) -> bool:
-        """
-        Return the current auto-scroll setting.
-        """
+        """Return auto-scroll state."""
         return self._autoscroll
 
     def _bind_copy_shortcuts(self) -> None:
-        """
-        Bind copy shortcuts on both wrapper and internal text widget.
-        """
+        """Bind copy shortcuts to text widgets."""
         widgets = [self.textbox]
         internal_textbox = getattr(self.textbox, "_textbox", None)
         if internal_textbox is not None:
@@ -125,9 +95,7 @@ class LogBoxView(ctk.CTkFrame):
             widget.bind("<Button-2>", self._show_copy_menu, add="+")
 
     def _show_copy_menu(self, event) -> str:
-        """
-        Show right-click context menu with copy action.
-        """
+        """Show right-click copy menu."""
         selected_text = self._get_selected_text()
         self._copy_menu.entryconfigure(
             "Copy",
@@ -142,16 +110,12 @@ class LogBoxView(ctk.CTkFrame):
         return "break"
 
     def _on_copy(self, _event) -> str:
-        """
-        Copy the selected log text to clipboard when Ctrl+C is pressed.
-        """
+        """Copy selected text and stop default handler."""
         self._copy_selected_text()
         return "break"
 
     def _copy_selected_text(self) -> None:
-        """
-        Copy current selection into clipboard.
-        """
+        """Copy selected text to clipboard."""
         selected_text = self._get_selected_text()
         if not selected_text:
             return
@@ -159,13 +123,11 @@ class LogBoxView(ctk.CTkFrame):
         root = self.winfo_toplevel()
         root.clipboard_clear()
         root.clipboard_append(selected_text)
-        # Flush clipboard ownership to the OS so copied text survives app exit.
+        # Ensure clipboard data stays after app exit.
         root.update()
 
     def _get_selected_text(self) -> str:
-        """
-        Return selected text from wrapper/internal text widgets.
-        """
+        """Get selected text from wrapper/internal widgets."""
         selected_text = ""
 
         for widget in (self.textbox, getattr(self.textbox, "_textbox", None)):
@@ -186,8 +148,6 @@ class LogBoxView(ctk.CTkFrame):
         return selected_text
 
     def destroy(self) -> None:
-        """
-        Unsubscribe from the logger before destroying the view.
-        """
+        """Unsubscribe Logger before destroy."""
         Logger.unsubscribe(self.print)
         super().destroy()

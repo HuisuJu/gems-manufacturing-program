@@ -8,3 +8,5 @@ This package exposes:
 
 from .spake2p import generate_verifier
 from .SetupPayload import SetupPayload, CommissioningFlow
+
+__all__ = ["generate_verifier", "SetupPayload", "CommissioningFlow"]

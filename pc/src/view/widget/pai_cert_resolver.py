@@ -1,276 +1,225 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
 from tkinter import messagebox
 
 import customtkinter as ctk
 
-
-class AttestationPathResolverError(Exception):
-    """
-    Base exception for attestation path resolver failures.
-    """
+from logger import Logger, LogLevel
+from storage import pai_cert_store
 
 
-class AttestationPathResolverConfigurationError(AttestationPathResolverError):
-    """
-    Raised when required configuration is missing or invalid.
-    """
+ChangedCallback = Callable[[], None]
 
 
-class PAICertResolverFrame(ctk.CTkFrame):
-    """
-    GUI frame for selecting and validating a PAI certificate file.
+_CARD_CORNER_RADIUS = 14
+_CARD_BORDER_WIDTH = 1
+_CARD_PADX = 20
+_CARD_PADY_TOP = 18
+_CARD_PADY_BOTTOM = 18
 
-    This widget does not use global settings.
-    It owns the currently loaded file path internally.
+_LABEL_WIDTH = 130
+_INPUT_HEIGHT = 35
+_BROWSE_BUTTON_WIDTH = 110
+_DESCRIPTION_WRAPLENGTH = 900
 
-    Features:
-        - Select PAI certificate file from file dialog
-        - Load PAI certificate file
-        - Show current file path
-        - Refresh current file
-        - Clear current selection
-        - Show status/error message
-    """
 
-    def __init__(self, master, **kwargs) -> None:
-        super().__init__(master, **kwargs)
+class PAICertResolverWidget(ctk.CTkFrame):
+    """Card-style widget for selecting and loading the PAI certificate file."""
 
-        self._path: Path | None = None
+    _DEFAULT_STATUS_TEXT = "Choose a valid PAI certificate file (.pem)."
+    _INVALID_STATUS_TEXT = "Not a valid PAI certificate file (.pem required)."
+    _VALID_STATUS_TEXT = "Valid PAI certificate file loaded."
+    _LOAD_ERROR_TEXT = (
+        "Failed to load the PAI certificate file. "
+        "Please select a valid .pem certificate file."
+    )
+
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        on_changed: ChangedCallback | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            parent,
+            corner_radius=_CARD_CORNER_RADIUS,
+            border_width=_CARD_BORDER_WIDTH,
+            **kwargs,
+        )
+
+        self._on_changed = on_changed
 
         self.grid_columnconfigure(1, weight=1)
 
         self._title_label = ctk.CTkLabel(
             self,
-            text="PAI Certificate File",
-            anchor="w",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            text="PAI Certificate",
+            anchor="nw",
+            width=_LABEL_WIDTH,
+            font=ctk.CTkFont(size=17, weight="bold"),
         )
         self._title_label.grid(
             row=0,
             column=0,
-            columnspan=3,
-            sticky="ew",
-            padx=12,
-            pady=(12, 6),
+            sticky="nw",
+            padx=(20, 12),
+            pady=(_CARD_PADY_TOP, 8),
         )
 
-        self._path_label = ctk.CTkLabel(
-            self,
-            text="File",
-            anchor="w",
-        )
-        self._path_label.grid(
-            row=1,
-            column=0,
-            sticky="w",
-            padx=(12, 6),
-            pady=6,
-        )
-
-        self._path_entry = ctk.CTkEntry(self)
-        self._path_entry.grid(
-            row=1,
+        self._input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._input_frame.grid(
+            row=0,
             column=1,
             sticky="ew",
-            padx=6,
-            pady=6,
+            padx=(0, _CARD_PADX),
+            pady=(_CARD_PADY_TOP, 8),
+        )
+        self._input_frame.grid_columnconfigure(0, weight=1)
+
+        self._path_entry = ctk.CTkEntry(
+            self._input_frame,
+            height=_INPUT_HEIGHT,
+            font=ctk.CTkFont(size=15),
+        )
+        self._path_entry.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=(0, 10),
         )
 
         self._browse_button = ctk.CTkButton(
-            self,
+            self._input_frame,
             text="Browse",
-            width=100,
+            width=_BROWSE_BUTTON_WIDTH,
+            height=_INPUT_HEIGHT,
+            corner_radius=10,
             command=self._on_browse,
         )
         self._browse_button.grid(
-            row=1,
-            column=2,
-            sticky="e",
-            padx=(6, 12),
-            pady=6,
-        )
-
-        self._button_row = ctk.CTkFrame(self, fg_color="transparent")
-        self._button_row.grid(
-            row=2,
-            column=0,
-            columnspan=3,
-            sticky="ew",
-            padx=12,
-            pady=(0, 8),
-        )
-        self._button_row.grid_columnconfigure((0, 1, 2), weight=1)
-
-        self._load_button = ctk.CTkButton(
-            self._button_row,
-            text="Load",
-            command=self._on_load,
-        )
-        self._load_button.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 4),
-            pady=0,
-        )
-
-        self._refresh_button = ctk.CTkButton(
-            self._button_row,
-            text="Refresh",
-            command=self._on_refresh,
-        )
-        self._refresh_button.grid(
             row=0,
             column=1,
-            sticky="ew",
-            padx=4,
-            pady=0,
-        )
-
-        self._clear_button = ctk.CTkButton(
-            self._button_row,
-            text="Clear",
-            command=self._on_clear,
-        )
-        self._clear_button.grid(
-            row=0,
-            column=2,
-            sticky="ew",
-            padx=(4, 0),
-            pady=0,
+            sticky="e",
         )
 
         self._status_label = ctk.CTkLabel(
             self,
-            text="No PAI certificate file loaded.",
-            anchor="w",
-            justify="left",
-            wraplength=700,
+            text=self._DEFAULT_STATUS_TEXT,
+            anchor="e",
+            justify="right",
+            wraplength=_DESCRIPTION_WRAPLENGTH,
+            font=ctk.CTkFont(size=13),
         )
         self._status_label.grid(
-            row=3,
+            row=1,
             column=0,
-            columnspan=3,
+            columnspan=2,
             sticky="ew",
-            padx=12,
-            pady=(6, 12),
+            padx=_CARD_PADX,
+            pady=(0, _CARD_PADY_BOTTOM),
         )
+
+        self._sync_from_store()
 
     @property
-    def path(self) -> Path | None:
-        """
-        Return the currently loaded PAI certificate file path.
-        """
-        return self._path
+    def current_path(self) -> Path | None:
+        """Return current PAI certificate file path."""
+        raw_path = pai_cert_store.cert_path
+        if not raw_path:
+            return None
+        return Path(raw_path)
 
-    def get_path(self) -> Path:
-        """
-        Return the configured PAI certificate file path.
-
-        Raises:
-            AttestationPathResolverConfigurationError:
-                If the PAI certificate file has not been loaded.
-        """
-        if self._path is None:
-            raise AttestationPathResolverConfigurationError(
-                "The PAI certificate file has not been configured."
-            )
-
-        return self._path
+    @property
+    def is_ready(self) -> bool:
+        """Return whether a valid PAI certificate is currently loaded."""
+        return pai_cert_store.cert_path is not None
 
     def load_path(self, path: Path | None) -> None:
-        """
-        Load a PAI certificate file path into the widget.
+        """Load PAI certificate file and update widget state."""
+        normalized_path = None
+        if path is not None:
+            normalized_path = str(path.expanduser().resolve())
 
-        Args:
-            path: PAI certificate file path, or None to clear current selection.
-        """
-        if path is None:
-            self._path = None
-            self._path_entry.delete(0, "end")
-            self._set_status("No PAI certificate file loaded.")
-            return
-
-        resolved = path.expanduser().resolve()
-
-        if not resolved.exists():
-            raise AttestationPathResolverConfigurationError(
-                f"The PAI certificate file does not exist: '{resolved}'."
-            )
-
-        if not resolved.is_file():
-            raise AttestationPathResolverConfigurationError(
-                f"The PAI certificate path is not a file: '{resolved}'."
-            )
-
-        self._path = resolved
-        self._path_entry.delete(0, "end")
-        self._path_entry.insert(0, str(resolved))
-        self._set_status(f"PAI certificate file loaded successfully: {resolved}")
+        pai_cert_store.load(normalized_path)
+        self._sync_from_store()
+        self._publish_changed()
 
     def _on_browse(self) -> None:
-        """
-        Open file selection dialog and put the selected path into the entry.
-        """
-        selected = filedialog.askopenfilename(
+        """Open file chooser and attempt to load selected PAI file."""
+        current_path = self._path_entry.get().strip()
+
+        filetypes = [
+            (
+                "Supported Files",
+                " ".join(
+                    f"*{extension}" for extension in pai_cert_store.expected_formats()
+                ),
+            ),
+            ("All Files", "*.*"),
+        ]
+
+        selected_file = filedialog.askopenfilename(
             title="Select PAI Certificate File",
-            filetypes=[
-                ("Certificate Files", "*.der *.pem *.crt *.cer"),
-                ("All Files", "*.*"),
-            ],
+            initialdir=str(Path(current_path).parent) if current_path else None,
+            filetypes=filetypes,
         )
-        if not selected:
+        if not selected_file:
             return
+
+        selected_path = Path(selected_file).expanduser().resolve()
 
         self._path_entry.delete(0, "end")
-        self._path_entry.insert(0, selected)
-
-    def _on_load(self) -> None:
-        """
-        Load the file currently written in the path entry.
-        """
-        raw_path = self._path_entry.get().strip()
-        if not raw_path:
-            self._show_error("Please select a PAI certificate file first.")
-            return
+        self._path_entry.insert(0, str(selected_path))
 
         try:
-            self.load_path(Path(raw_path))
-        except AttestationPathResolverError as exc:
-            self._set_status(str(exc))
-            self._show_error(str(exc))
+            self.load_path(selected_path)
+        except Exception as exc:
+            Logger.write(LogLevel.ALERT, str(exc))
+            self._set_invalid_status(self._INVALID_STATUS_TEXT)
+            self._show_error(self._LOAD_ERROR_TEXT)
 
-    def _on_refresh(self) -> None:
-        """
-        Reload the currently loaded PAI certificate file.
-        """
-        if self._path is None:
-            self._show_error("There is no PAI certificate file to refresh.")
+    def _sync_from_store(self) -> None:
+        """Sync entry text and status label from store state."""
+        current_path = pai_cert_store.cert_path
+
+        self._path_entry.delete(0, "end")
+
+        if not current_path:
+            self._set_default_status()
             return
 
-        try:
-            self.load_path(self._path)
-        except AttestationPathResolverError as exc:
-            self._set_status(str(exc))
-            self._show_error(str(exc))
+        self._path_entry.insert(0, current_path)
+        self._set_valid_status(self._VALID_STATUS_TEXT)
 
-    def _on_clear(self) -> None:
-        """
-        Clear current PAI certificate file selection.
-        """
-        self.load_path(None)
+    def _set_default_status(self) -> None:
+        """Show neutral status."""
+        self._status_label.configure(
+            text=self._DEFAULT_STATUS_TEXT,
+            text_color=("gray45", "gray65"),
+        )
 
-    def _set_status(self, message: str) -> None:
-        """
-        Update status message label.
-        """
-        self._status_label.configure(text=message)
+    def _set_valid_status(self, message: str) -> None:
+        """Show valid PAI file status."""
+        self._status_label.configure(
+            text=message,
+            text_color="green",
+        )
+
+    def _set_invalid_status(self, message: str) -> None:
+        """Show invalid PAI file status."""
+        self._status_label.configure(
+            text=message,
+            text_color="red",
+        )
 
     def _show_error(self, message: str) -> None:
-        """
-        Show an error message popup.
-        """
+        """Show an error popup."""
         messagebox.showerror("PAI Certificate Error", message)
+
+    def _publish_changed(self) -> None:
+        """Notify parent that widget state changed."""
+        if self._on_changed is not None:
+            self._on_changed()

@@ -1,30 +1,52 @@
 from __future__ import annotations
 
-from .schema import FactoryDataSchema
-
 from .retriever import Retriever
+from .schema import FactoryDataSchema
+from .retrievers import (
+    DoorLockSerialNumberRetriever,
+    ManufacturingDataRetriever,
+    MatterAttestationDataRetriever,
+    MatterOnboardingDataRetriever,
+    ThermostatSerialNumberRetriever,
+)
+from system import ModelName
 
-from .retrievers.device_identity import DeviceIdentityRetriever
 
-from .retrievers.manufacturing import ManufacturingDataRetriever
-
-from .retrievers.matter_attestation import MatterAttestationDataRetriever
-
-from .retrievers.matter_onboarding import MatterOnboardingDataRetriever
+class FactoryDataRetrieverFactoryError(Exception):
+    """Raised when a schema model does not have a retriever configuration."""
 
 
 class FactoryDataRetrieverFactory:
     """Create retrievers for one schema."""
 
     @classmethod
-    
     def create(cls, schema: FactoryDataSchema) -> list[Retriever]:
         """Create retrievers for the given schema."""
-        retrievers: list[Retriever] = [
-            DeviceIdentityRetriever(),
-            ManufacturingDataRetriever(),
-            MatterAttestationDataRetriever(),
-            MatterOnboardingDataRetriever(),
-        ]
+        _ = cls
+        model = schema.get_model()
 
-        return retrievers
+        if model == ModelName.DOORLOCK:
+            return [
+                DoorLockSerialNumberRetriever(),
+                ManufacturingDataRetriever(),
+                MatterAttestationDataRetriever(),
+                MatterOnboardingDataRetriever(),
+            ]
+
+        if model == ModelName.THERMOSTAT:
+            return [
+                ThermostatSerialNumberRetriever(),
+                MatterAttestationDataRetriever(),
+                MatterOnboardingDataRetriever(),
+            ]
+
+        if model == ModelName.EMULATOR:
+            return [
+                ManufacturingDataRetriever(),
+                MatterAttestationDataRetriever(),
+                MatterOnboardingDataRetriever(),
+            ]
+
+        raise FactoryDataRetrieverFactoryError(
+            f"No retriever configuration exists for model '{model.value}'."
+        )

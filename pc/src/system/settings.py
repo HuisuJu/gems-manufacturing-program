@@ -1,241 +1,169 @@
 from __future__ import annotations
 
 import json
-
-from dataclasses import dataclass
-
-from enum import Enum
-
 from pathlib import Path
+from typing import Any, Callable
 
-from typing import Any, Callable, Generic, TypeVar, cast
-
-from .utils import program_metadata_path
+from .utils import metadata_folder
 
 
 class SettingsError(Exception):
     """Base settings error."""
 
 
-class SettingsTypeError(SettingsError):
-    """Raised when a setting value has an invalid type."""
-
-
-class SettingsSerializationError(SettingsError):
-    """Raised when settings cannot be serialized or deserialized."""
-
-
-class ModelName(str, Enum):
-    """Supported models."""
-
-    DOORLOCK    = "doorlock"
-    THERMOSTAT  = "thermostat"
-    EMULATOR    = "emulator"
-
-
-class SettingsItem(str, Enum):
-    """Settings items."""
-
-    MODEL_NAME        = "model-name"
-    DAC_POOL_DIR_PATH = "dac-pool-dir-path"
-    PAI_FILE_PATH     = "pai-file-path"
-    CD_FILE_PATH      = "cd-file-path"
-
-
-SettingsValue = Any
-SettingsCallback = Callable[[SettingsItem, Any], None]
-
-T = TypeVar("T")
-
-
-@dataclass(frozen=True)
-
-
-class SettingSpec(Generic[T]):
-    """Serialization and type rules for one setting item."""
-
-    type: type[Any]
-    decoder: Callable[[Any], T]
-    encoder: Callable[[T], Any]
-
-
-def _decode_model_name(raw: Any) -> ModelName | None:
-    if raw is None:
-        return None
-    try:
-        return ModelName(str(raw))
-    except ValueError:
-        return None
-
-
-def _encode_model_name(value: ModelName | None) -> str | None:
-    if value is None:
-        return None
-    return value.value
-
-
-def _decode_path(raw: Any) -> Path | None:
-    if raw is None:
-        return None
-    try:
-        return Path(str(raw)).expanduser().resolve()
-    except Exception:
-        return None
-
-
-def _encode_path(value: Path | None) -> str | None:
-    if value is None:
-        return None
-    return str(value)
+SettingsCallback = Callable[[str, Any], None]
 
 
 class Settings:
-    """Global settings store."""
+    """Simple JSON-backed key-value settings store."""
 
+    # Settings file location.
     _SETTINGS_FILE_NAME = "settings.json"
-    _SETTINGS_FILE_PATH: Path = program_metadata_path() / _SETTINGS_FILE_NAME
+    _SETTINGS_FILE_PATH: Path = metadata_folder() / _SETTINGS_FILE_NAME
 
-    _SPECS: dict[SettingsItem, SettingSpec[Any]] = {
-        SettingsItem.MODEL_NAME: SettingSpec[ModelName | None](
-            type=ModelName,
-            decoder=_decode_model_name,
-            encoder=_encode_model_name,
-        ),
-        SettingsItem.DAC_POOL_DIR_PATH: SettingSpec[Path | None](
-            type=Path,
-            decoder=_decode_path,
-            encoder=_encode_path,
-        ),
-        SettingsItem.PAI_FILE_PATH: SettingSpec[Path | None](
-            type=Path,
-            decoder=_decode_path,
-            encoder=_encode_path,
-        ),
-        SettingsItem.CD_FILE_PATH: SettingSpec[Path | None](
-            type=Path,
-            decoder=_decode_path,
-            encoder=_encode_path,
-        ),
-    }
-
-    _values: dict[SettingsItem, SettingsValue] = {}
-    _subscribers: dict[SettingsItem, list[SettingsCallback]] = {}
-    _initialized: bool = False
+    # In-memory state.
+    _values: dict[str, Any] = {}
+    _subscribers: dict[str, list[SettingsCallback]] = {}
+    _is_initialized: bool = False
 
     @classmethod
-
     def init(cls) -> None:
-        """Initialize settings storage."""
-        cls._values = {item: None for item in SettingsItem}
-        cls._subscribers = {item: [] for item in SettingsItem}
+        """Initialize and load settings."""
+        cls._values = {}
+        cls._subscribers = {}
         cls._load()
-        cls._initialized = True
+        cls._is_initialized = True
 
     @classmethod
+    def keys(cls) -> list[str]:
+        """Return all stored keys."""
+        if not cls._is_initialized:
+            return []
+        return list(cls._values.keys())
 
-    def get(cls, item: SettingsItem) -> Any:
-        """Return the raw value for a setting item."""
-        if not cls._initialized:
+    @classmethod
+    def has(cls, key: str) -> bool:
+        """Return True if key exists."""
+        if not cls._is_initialized:
+            return False
+        return key in cls._values
+
+    @classmethod
+    def get(cls, key: str) -> Any:
+        """Return value for key, or None if missing."""
+        if not cls._is_initialized:
             return None
-        return cls._values[item]
+        return cls._values.get(key, None)
 
     @classmethod
-
-    def set(cls, item: SettingsItem, value: Any) -> None:
-        """Set a setting value."""
-        if not cls._initialized:
+    def set(cls, key: str, value: Any) -> None:
+        """Set value for key, persist it, and notify subscribers on change."""
+        if not cls._is_initialized:
             return
 
-        if cls._values[item] == value:
+        old_value = cls._values.get(key, None)
+        if key in cls._values and old_value == value:
             return
 
-        cls._values[item] = value
+        cls._values[key] = value
         cls._save()
-
-        for callback in tuple(cls._subscribers[item]):
-            callback(item, value)
+        cls._publish(key, value)
 
     @classmethod
-
-    def clear(cls, item: SettingsItem) -> None:
-        """Clear a setting value."""
-        if not cls._initialized:
+    def clear(cls, key: str) -> None:
+        """Clear key value by setting None."""
+        if not cls._is_initialized:
             return
-        cls.set(item, None)
+        cls.set(key, None)
 
     @classmethod
-
-    def subscribe(cls, item: SettingsItem, callback: SettingsCallback) -> None:
-        """Subscribe to changes for a specific setting."""
-        if not cls._initialized:
+    def remove(cls, key: str) -> None:
+        """Remove key, persist it, and notify subscribers on change."""
+        if not cls._is_initialized:
             return
 
-        subscribers = cls._subscribers[item]
+        if key not in cls._values:
+            return
+
+        del cls._values[key]
+        cls._save()
+        cls._publish(key, None)
+
+    @classmethod
+    def subscribe(cls, key: str, callback: SettingsCallback) -> None:
+        """Subscribe to changes for a specific key."""
+        if not cls._is_initialized:
+            return
+
+        subscribers = cls._subscribers.setdefault(key, [])
         if callback not in subscribers:
             subscribers.append(callback)
 
     @classmethod
-
-    def unsubscribe(cls, item: SettingsItem, callback: SettingsCallback) -> None:
-        """Unsubscribe from changes for a specific setting."""
-        if not cls._initialized:
+    def unsubscribe(cls, key: str, callback: SettingsCallback) -> None:
+        """Unsubscribe from changes for a specific key."""
+        if not cls._is_initialized:
             return
 
-        subscribers = cls._subscribers[item]
-        if callback in subscribers:
+        subscribers = cls._subscribers.get(key)
+        if not subscribers:
+            return
+
+        try:
             subscribers.remove(callback)
+        except ValueError:
+            return
+
+        if not subscribers:
+            del cls._subscribers[key]
 
     @classmethod
+    def _publish(cls, key: str, value: Any) -> None:
+        """Notify subscribers of a key change."""
+        for callback in list(cls._subscribers.get(key, [])):
+            try:
+                callback(key, value)
+            except Exception as exc:
+                raise SettingsError(
+                    f"Subscriber callback failed for key '{key}'."
+                ) from exc
 
+    @classmethod
     def _load(cls) -> None:
-        """Load settings from the JSON file."""
+        """Load settings from disk, create file if missing."""
         settings_path = cls._SETTINGS_FILE_PATH
         if not settings_path.exists():
+            cls._values = {}
+            cls._save()
             return
 
         try:
             with settings_path.open("r", encoding="utf-8") as file:
                 raw_data = json.load(file)
-                if not isinstance(raw_data, dict):
-                    raise SettingsSerializationError(
-                        f"Invalid settings format in {settings_path}: "
-                        "top-level JSON value must be an object."
-                    )
-        except SettingsSerializationError:
-            raise
         except Exception as exc:
-            raise SettingsSerializationError(
+            raise SettingsError(
                 f"Failed to read settings from {settings_path}."
             ) from exc
 
-        for item, spec in cls._SPECS.items():
-            raw_value = raw_data.get(item.value)
-            decoded = spec.decoder(raw_value)
-            if decoded is not None and not isinstance(decoded, spec.type):
-                decoded = None
+        if not isinstance(raw_data, dict):
+            raise SettingsError(
+                f"Invalid settings format in {settings_path}: "
+                "top-level JSON value must be an object."
+            )
 
-            cls._values[item] = decoded
+        cls._values = raw_data
 
     @classmethod
-
     def _save(cls) -> None:
-        """Save settings to the JSON file."""
+        """Persist current settings to disk."""
         settings_path = cls._SETTINGS_FILE_PATH
         settings_path.parent.mkdir(parents=True, exist_ok=True)
 
-        encoded: dict[str, Any] = {}
-        for item, value in cls._values.items():
-            spec = cls._SPECS[item]
-            try:
-                encoded[item.value] = spec.encoder(cast(Any, value))
-            except Exception:
-                encoded[item.value] = value
-
         try:
             with settings_path.open("w", encoding="utf-8") as file:
-                json.dump(encoded, file, ensure_ascii=False, indent=2)
+                json.dump(cls._values, file, ensure_ascii=False, indent=2)
                 file.write("\n")
         except Exception as exc:
-            raise SettingsSerializationError(
+            raise SettingsError(
                 f"Failed to write settings to {settings_path}."
             ) from exc

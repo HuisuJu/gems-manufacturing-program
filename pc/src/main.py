@@ -1,288 +1,152 @@
 from __future__ import annotations
 
 import sys
-
-from traceback import format_exc
-
 from pathlib import Path
 
-from typing import Any, cast
-
 from logger import Logger, LogLevel
+from system import MODEL_NAME_KEY, ModelName, Settings
 
-from system import ModelName, Settings, SettingsItem
-
-from stream import SerialStream, Stream
-
-from emulator import EmulatorDispatcher, EmulatorStream
-
-from thermostat import ThermostatDispatcher
-
-from factory_data import FactoryDataProvider
-
-from factory_data.retrievers import (
-    DeviceIdentityRetriever,
-    ManufacturingDataRetriever,
-    MatterAttestationDataRetriever,
-    MatterOnboardingDataRetriever,
-)
-
-from provision import ProvisionManager, ProvisionReporter
-
-from view.frame import ProvisioningFrame
-
-from view.window import Window
+_active_model: ModelName | None = None
 
 
-def _write_bootstrap_log(message: str) -> None:
-    """
-    Write critical startup/runtime messages to stderr and a local file.
-    """
-    try:
-        print(message, file=sys.stderr, flush=True)
-    except Exception:
-        pass
-
-    try:
-        log_directory = Path.home() / ".gems_factory" / "logs"
-        log_directory.mkdir(parents=True, exist_ok=True)
-        log_path = log_directory / "runtime_bootstrap.log"
-        with log_path.open("a", encoding="utf-8") as log_file:
-            log_file.write(f"{message}\n")
-    except Exception:
-        pass
+class ApplicationInitializationError(Exception):
+    """Raised when application-level initialization fails."""
 
 
-def _build_provider_for_model(model_name: ModelName) -> FactoryDataProvider:
-    """
-    Build the factory data provider for the selected model.
+def _get_schema_dir() -> Path:
+    """Return the schema/json directory for source and bundled execution."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        schema_dir = Path(sys._MEIPASS) / "schema" / "json"
+    else:
+        # Source execution:
+        # repo_root/
+        #   schema/json
+        #   pc/src/main.py
+        schema_dir = Path(__file__).resolve().parents[2] / "schema" / "json"
 
-    This function is intentionally small here, because the exact provider
-    wiring depends on the current retriever/schema configuration.
-    """
-    schema_directory = Path(__file__).resolve().parents[2] / "schema" / "json"
-
-    provider = FactoryDataProvider(
-        schema_directory=schema_directory,
-        model_name=model_name.value,
-    )
-
-    provider.add_retriever(DeviceIdentityRetriever())
-    provider.add_retriever(ManufacturingDataRetriever())
-    provider.add_retriever(MatterAttestationDataRetriever())
-    provider.add_retriever(MatterOnboardingDataRetriever())
-
-    return provider
-
-
-def _is_provider_prerequisite_ready() -> bool:
-    """
-    Return whether provider prerequisites are configured.
-
-    START must remain disabled until all attestation input paths are set.
-    """
-    required_items = (
-        SettingsItem.DAC_POOL_DIR_PATH,
-        SettingsItem.PAI_FILE_PATH,
-        SettingsItem.CD_FILE_PATH,
-    )
-
-    return all(Settings.get(item) is not None for item in required_items)
-
-
-def _build_dispatcher_for_model(
-    model_name: ModelName,
-    serial_manager: Stream,
-):
-    """
-    Build the dispatcher for the selected model.
-
-    Emulator and Thermostat are supported directly.
-    """
-    if model_name == ModelName.EMULATOR:
-        return EmulatorDispatcher(
-            initial_ready=True,
-            dispatch_delay_sec=1.0,
-            default_success=True,
+    if not schema_dir.is_dir():
+        raise ApplicationInitializationError(
+            f"Schema directory not found: {schema_dir}"
         )
 
-    if model_name == ModelName.THERMOSTAT:
-        return ThermostatDispatcher(stream=serial_manager)
+    return schema_dir
 
-    raise NotImplementedError(
-        f"Dispatcher for model '{model_name.value}' is not implemented yet."
+
+def _normalize_model_name(value: object) -> ModelName:
+    """Convert one raw value to ModelName."""
+    if isinstance(value, ModelName):
+        return value
+
+    if isinstance(value, str) and value:
+        try:
+            return ModelName(value)
+        except ValueError as exc:
+            raise ApplicationInitializationError(
+                f"Invalid model value: {value!r}"
+            ) from exc
+
+    raise ApplicationInitializationError(
+        f"Invalid model value: {value!r}"
     )
 
 
-def _wire_provisioning(
-    window: Window,
-    serial_manager: Stream,
-) -> None:
-    """
-    Wire runtime objects after the window and pages have been created.
-    """
-    provisioning_frame = window.pages.get("Provisioning")
-    if provisioning_frame is None:
-        Logger.write(LogLevel.WARNING, "Provisioning page is missing.")
+def _teardown_active_model() -> None:
+    """Teardown the currently active model's runtime, if any."""
+    global _active_model
+
+    if _active_model is None:
         return
 
-    if not isinstance(provisioning_frame, ProvisioningFrame):
-        Logger.write(LogLevel.WARNING, "Provisioning page type is invalid.")
-        return
+    match _active_model:
+        case ModelName.DOORLOCK:
+            pass
+        case ModelName.THERMOSTAT:
+            from models import thermostat
+            thermostat.teardown()
+        case ModelName.EMULATOR:
+            from models import emulator
+            emulator.teardown()
 
-    model_name = cast(ModelName | None, Settings.get(SettingsItem.MODEL_NAME))
-    if model_name is None:
-        Logger.write(LogLevel.WARNING, "Model name is not configured.")
-        return
+    _active_model = None
 
-    try:
-        provider = _build_provider_for_model(model_name)
-        dispatcher = _build_dispatcher_for_model(
-            model_name=model_name,
-            serial_manager=serial_manager,
-        )
-        reporter = cast(Any, ProvisionReporter)()
 
-        def _publish_qr_from_factory_data(factory_data: dict[str, Any]) -> None:
-            payload = factory_data.get("onboarding_payload")
-            if not isinstance(payload, str):
-                return
+def _setup_runtime_for_model(model: ModelName) -> None:
+    """Teardown the previous model and set up a new one."""
+    global _active_model
 
-            manual_code_value = factory_data.get("onboarding_manual_code")
-            manual_code = (
-                manual_code_value if isinstance(manual_code_value, str) else None
+    _teardown_active_model()
+    schema_dir = _get_schema_dir()
+
+    match model:
+        case ModelName.DOORLOCK:
+            Logger.write(
+                LogLevel.WARNING,
+                "Doorlock model is not available yet.",
             )
-
-            provisioning_frame.after(
-                0,
-                lambda: provisioning_frame.show_qr_code(
-                    payload=payload,
-                    manual_code=manual_code,
-                    auto_show=True,
-                ),
-            )
-
-        provision_manager = cast(Any, ProvisionManager)(
-            provider=provider,
-            dispatcher=dispatcher,
-            view=provisioning_frame.provisioning_view,
-            reporter=reporter,
-            provider_ready_checker=_is_provider_prerequisite_ready,
-            success_data_publisher=_publish_qr_from_factory_data,
-        )
-    except Exception as exc:
-        Logger.write(
-            LogLevel.WARNING,
-            "Failed to initialize provisioning runtime "
-            f"({type(exc).__name__}: {exc})",
-        )
-        return
-
-    def on_provisioning_user_event(event) -> None:
-        if event.action == "start":
-            provision_manager.start()
             return
 
-        if event.action == "finish":
-            provision_manager.finish()
-            provisioning_frame.log_settings_view.handle_finish()
-            return
+        case ModelName.THERMOSTAT:
+            from models import thermostat
+            thermostat.setup(schema_dir, model)
 
+        case ModelName.EMULATOR:
+            from models import emulator
+            emulator.setup(schema_dir, model)
+
+        case _:
+            raise ApplicationInitializationError(
+                f"Unsupported model: {model!r}"
+            )
+
+    _active_model = model
+
+
+def _run_application() -> None:
+    """Initialize and run the application."""
+
+    def on_model_selected(_: str, value: object) -> None:
+        """Reconfigure runtime objects when model changes."""
+        model = _normalize_model_name(value)
+        _setup_runtime_for_model(model)
+
+    Settings.subscribe(MODEL_NAME_KEY, on_model_selected)
+
+    existing_model = Settings.get(MODEL_NAME_KEY)
+    if existing_model is not None:
+        on_model_selected(MODEL_NAME_KEY, existing_model)
+    else:
         Logger.write(
-            LogLevel.WARNING,
-            f"Unhandled provisioning user action: {event.action}",
+            LogLevel.DEBUG,
+            "MODEL_NAME is not set yet. Runtime setup is deferred.",
         )
 
-    provisioning_frame.provisioning_view.set_user_event_listener(
-        on_provisioning_user_event
-    )
+    from view import Window
 
-    provision_manager.activate()
-
-
-def _select_serial_manager_for_model(
-    model_name: ModelName | None,
-    serial_manager: SerialStream,
-    emulator_serial_manager: EmulatorStream,
-) -> Stream:
-    if model_name == ModelName.EMULATOR:
-        return emulator_serial_manager
-    return serial_manager
+    window = Window()
+    window.mainloop()
 
 
 def main() -> None:
-    _write_bootstrap_log("[BOOT] application start")
-
+    """Application entry point."""
     Logger.start()
-    serial_manager = SerialStream()
-    emulator_serial_manager = EmulatorStream()
-    window: Window | None = None
+    Settings.init()
 
     try:
+        Logger.write(LogLevel.DEBUG, "Application start.")
+        _run_application()
 
-        try:
-            window = Window(
-                serial_manager=serial_manager,
-                emulator_serial_manager=emulator_serial_manager,
-            )
-        except Exception:
-            _write_bootstrap_log(
-                "[BOOT][ERROR] Window initialization failed\n"
-                f"{format_exc()}"
-            )
-            return
-
-        def _on_window_close() -> None:
-            try:
-                serial_manager.close()
-            except Exception:
-                pass
-
-            try:
-                emulator_serial_manager.close()
-            except Exception:
-                pass
-
-            if window is not None and window.winfo_exists():
-                window.destroy()
-
-        window.protocol("WM_DELETE_WINDOW", _on_window_close)
-
-        if window.selected_model_name is None:
-            return
-
-        selected_serial_manager = _select_serial_manager_for_model(
-            window.selected_model_name,
-            serial_manager,
-            emulator_serial_manager,
-        )
-
-        _wire_provisioning(
-            window=window,
-            serial_manager=selected_serial_manager,
-        )
-
-        window.mainloop()
-
-    except Exception:
-        _write_bootstrap_log(
-            "[BOOT][ERROR] Unhandled exception in main\n"
-            f"{format_exc()}"
+    except Exception as exc:
+        Logger.write(
+            LogLevel.ALERT,
+            "Unhandled exception in application main loop. "
+            f"({type(exc).__name__}: {exc})",
         )
         raise
+
     finally:
-        try:
-            serial_manager.close()
-        except Exception:
-            pass
-
-        try:
-            emulator_serial_manager.close()
-        except Exception:
-            pass
-
-        Logger.stop(drain=False)
-        _write_bootstrap_log("[BOOT] application shutdown")
+        _teardown_active_model()
+        Logger.write(LogLevel.DEBUG, "Application shutdown.")
+        Logger.stop(timeout_sec=1.0)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "title": "GEMS Emulator Factory Data",
+  "model": "emulator",
   "required": [
-    "serial_number",
     "manufactured_date",
     "dac_cert",
     "dac_public_key",

@@ -65,7 +65,10 @@ fi
 mkdir -p "${PC_OUT_DIR}"
 mkdir -p "${DEVICE_OUT_DIR}"
 
-mapfile -t PROTO_FILES < <(find "${PROTO_DIR}" -type f -name "*.proto" | sort)
+PROTO_FILES=()
+while IFS= read -r proto; do
+  PROTO_FILES+=("${proto}")
+done < <(find "${PROTO_DIR}" -type f -name "*.proto" | sort)
 
 if [ "${#PROTO_FILES[@]}" -eq 0 ]; then
   error "no .proto files found under:

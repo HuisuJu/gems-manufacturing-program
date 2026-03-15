@@ -1,80 +1,112 @@
 from __future__ import annotations
 
 import copy
-
-from typing import Any, Mapping
+from typing import Any, ClassVar
 
 from .retriever import Retriever
-
 from .retriever_factory import FactoryDataRetrieverFactory
-
 from .schema import FactoryDataSchema
 
 
 class FactoryDataProviderError(Exception):
-    """Base provider error."""
+    """Provider error."""
+
+
+class FactoryDataProviderAlreadyInitializedError(FactoryDataProviderError):
+    """Provider is already initialized."""
 
 
 class FactoryDataProviderInProgressError(FactoryDataProviderError):
-    """Raised when pull() is called while previous data is in progress."""
+    """Previous data is still in progress."""
 
 
 class FactoryDataProviderReportError(FactoryDataProviderError):
-    """Raised when report() is called without in-progress data."""
+    """No in-progress data to report."""
 
 
 class FactoryDataProvider:
-    """Coordinate retrievers and produce merged factory data."""
+    """Provide factory data through class-level APIs."""
 
-    def __init__(
-        self,
-        schema: FactoryDataSchema,
-    ) -> None:
-        """Initialize provider with resolved schema."""
-        self._schema = schema
-        self._retrievers: list[Retriever] = (
-            FactoryDataRetrieverFactory.create(schema)
+    _is_initialized: ClassVar[bool] = False
+    _schema: ClassVar[FactoryDataSchema | None] = None
+    _retrievers: ClassVar[list[Retriever]] = []
+    _in_progress_data: ClassVar[dict[str, Any] | None] = None
+
+    def __new__(cls, *args, **kwargs):
+        raise TypeError(
+            "FactoryDataProvider cannot be instantiated. "
+            "Use class-level APIs."
         )
-        self._in_progress_data: dict[str, Any] | None = None
 
-
-    def pull(self) -> dict[str, Any]:
-        """Pull and merge factory data from all retrievers."""
-        if self._in_progress_data is not None:
-            raise FactoryDataProviderInProgressError(
-                "Factory data is already in progress. "
-                "Report it before pulling another one."
+    @classmethod
+    def init(cls, schema: FactoryDataSchema) -> None:
+        """Initialize the provider."""
+        if cls._is_initialized:
+            raise FactoryDataProviderAlreadyInitializedError(
+                "FactoryDataProvider is already initialized."
             )
 
-        merged: dict[str, Any] = {}
-        for retriever in self._retrievers:
-            partial = retriever.fetch(self._schema)
-            merged.update(partial)
+        cls._schema = schema
+        cls._retrievers = FactoryDataRetrieverFactory.create(schema)
+        cls._in_progress_data = None
+        cls._is_initialized = True
+
+    @classmethod
+    def is_initialized(cls) -> bool:
+        """Return whether the provider is initialized."""
+        return cls._is_initialized
+
+    @classmethod
+    def get_schema(cls) -> FactoryDataSchema | None:
+        """Return the current schema."""
+        if not cls._is_initialized:
+            return None
+
+        return copy.deepcopy(cls._schema)
+
+    @classmethod
+    def pull(cls) -> dict[str, Any] | None:
+        """Pull one factory data set."""
+        if not cls._is_initialized:
+            return None
+
+        schema = cls._schema
+
+        if cls._in_progress_data is not None:
+            raise FactoryDataProviderInProgressError(
+                "Factory data is already in progress."
+            )
+
+        merged_data: dict[str, Any] = {}
+        for retriever in cls._retrievers:
+            partial_data = retriever.fetch(schema)
+            merged_data.update(partial_data)
 
         missing = [
-            field
-            for field in self._schema.required_fields
-            if field not in merged
+            field for field in schema.required_fields if field not in merged_data
         ]
         if missing:
             missing_fields = ", ".join(sorted(missing))
             raise FactoryDataProviderError(
-                "The pulled factory data is missing required fields: "
-                f"{missing_fields}"
+                f"Missing required fields: {missing_fields}"
             )
 
-        self._in_progress_data = copy.deepcopy(merged)
+        cls._in_progress_data = copy.deepcopy(merged_data)
+        return merged_data
 
-        return merged
+    @classmethod
+    def report(cls, is_success: bool) -> None:
+        """Report the result of the current data set."""
+        if not cls._is_initialized:
+            return
 
-    def report(self, is_success: bool) -> None:
-        """Report provisioning result to all retrievers."""
-        if self._in_progress_data is None:
+        if cls._in_progress_data is None:
             raise FactoryDataProviderReportError(
-                "There is no factory data in progress to report."
+                "There is no factory data in progress."
             )
-        
-        for retriever in self._retrievers:
-            retriever.report(is_success=is_success)
 
-        self._in_progress_data = None
+        try:
+            for retriever in cls._retrievers:
+                retriever.report(is_success=is_success)
+        finally:
+            cls._in_progress_data = None

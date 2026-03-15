@@ -1,9 +1,20 @@
-from .base import Stream, StreamEventListener
+from .base import (
+    Stream,
+    StreamError,
+    StreamEvent,
+    StreamEventError,
+    StreamEventListener,
+    StreamIOError,
+)
 
 from .serial import SerialStream
 
 __all__ = [
-    'Stream',
-    'StreamEventListener',
-    'SerialStream',
+    "Stream",
+    "StreamError",
+    "StreamEvent",
+    "StreamEventError",
+    "StreamEventListener",
+    "StreamIOError",
+    "SerialStream",
 ]

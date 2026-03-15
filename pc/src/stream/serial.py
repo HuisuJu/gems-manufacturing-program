@@ -1,259 +1,223 @@
-"""Serial raw byte stream implementation.
-
-This module provides :class:`SerialStream`, a thread-safe serial stream
-implementation that reads and writes raw bytes only.
-
-No framing, packet parsing, encoding, retransmission, or protocol-specific
-flow control is handled here. Those responsibilities belong to upper layers.
-"""
+"""Serial stream implementation."""
 
 from __future__ import annotations
 
 import threading
+import time
 from queue import Empty, Queue
 from typing import Optional
 
 import serial
+import serial.threaded
 import serial.tools.list_ports
 
-from logger.manager import Logger, LogLevel
-from .base import Stream, StreamEventListener
+from .base import (
+    Stream,
+    StreamEvent,
+    StreamIOError,
+)
 
 
 class SerialStream(Stream):
-    """Thread-safe raw serial stream manager.
+    """Thread-safe serial byte stream based on pySerial ReaderThread."""
 
-    Incoming UART data is collected as raw byte chunks and made available
-    through :meth:`read`. Outgoing data is written as-is through :meth:`write`.
-    """
+    _lock: threading.Lock
+    _serial_port: Optional[serial.Serial]
+    _reader_thread: Optional[serial.threaded.ReaderThread]
+    _reader_queue: Queue[bytes]
+    _reader_buffer: bytearray
+    _protocol: Optional["SerialStream._Protocol"]
+    _is_connected: bool
+
+    class _Protocol(serial.threaded.Protocol):
+        """pySerial protocol bridge for SerialStream."""
+
+        _owner: "SerialStream"
+
+        def __init__(self, owner: "SerialStream") -> None:
+            self._owner = owner
+
+        def data_received(self, data: bytes) -> None:
+            if data:
+                self._owner._reader_queue.put(data)
+
+        def connection_made(self, transport: serial.threaded.ReaderThread) -> None:
+            _ = transport
+            with self._owner._lock:
+                self._owner._is_connected = True
+
+            self._owner.publish(StreamEvent.CONNECTED)
+
+        def connection_lost(self, exc: Optional[Exception]) -> None:
+            _ = exc
+            with self._owner._lock:
+                self._owner._is_connected = False
+
+            self._owner.publish(StreamEvent.DISCONNECTED)
 
     def __init__(self) -> None:
-        """Initialize the serial stream manager."""
+        """Initialize stream state."""
+        super().__init__()
         self._lock = threading.Lock()
-        self._serial: Optional[serial.Serial] = None
-        self._rx_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
 
-        self._connected_flag = False
-        self._read_queue: Queue[bytes] = Queue()
-        self._event_listeners: list[StreamEventListener] = []
+        self._reader_thread: Optional[serial.threaded.ReaderThread] = None
+        self._reader_queue: Queue[bytes] = Queue()
+        self._reader_buffer = bytearray()
+        self._protocol: Optional[SerialStream._Protocol] = None
+
+        self._serial_port: Optional[serial.Serial] = None
+        self._is_connected = False
 
     @staticmethod
     def list_ports() -> list[str]:
-        """Return currently available serial device names.
-
-        Returns:
-            Device path list.
-        """
-        ports = serial.tools.list_ports.comports()
-        return [p.device for p in ports]
-
-    def subscribe_event(self, listener: StreamEventListener) -> None:
-        """Register a stream state listener.
-
-        Args:
-            listener:
-                Event callback.
-        """
-        with self._lock:
-            if listener not in self._event_listeners:
-                self._event_listeners.append(listener)
-
-    def unsubscribe_event(self, listener: StreamEventListener) -> None:
-        """Unregister a stream state listener.
-
-        Args:
-            listener:
-                Previously registered callback.
-        """
-        with self._lock:
-            if listener in self._event_listeners:
-                self._event_listeners.remove(listener)
+        """Return available serial device names."""
+        return [port.device for port in serial.tools.list_ports.comports()]
 
     def is_connected(self) -> bool:
-        """Return current connection status.
-
-        Returns:
-            True if the serial port is open and the reader thread is alive.
-        """
+        """Return whether the stream is connected."""
         with self._lock:
-            s = self._serial
-            t = self._rx_thread
-            ok = self._connected_flag
+            serial_port = self._serial_port
+            reader_thread = self._reader_thread
+            is_connected = self._is_connected
 
-        return s is not None and s.is_open and t is not None and t.is_alive() and ok
+        return (
+            serial_port is not None
+            and serial_port.is_open
+            and reader_thread is not None
+            and reader_thread.is_alive()
+            and is_connected
+        )
 
     def open(self, port: str, baudrate: int = 115200) -> bool:
-        """Open the serial port and start the reader thread.
-
-        Args:
-            port:
-                Serial device name.
-            baudrate:
-                UART baudrate.
-
-        Returns:
-            True on success, otherwise False.
-        """
-        self.close()
+        """Open a serial port and start the reader thread."""
+        if (
+            self.is_connected()
+            and self._serial_port.port == port
+            and self._serial_port.baudrate == baudrate
+        ):
+            return True
+        else:
+            self.close()
 
         try:
-            s = serial.Serial(port, baudrate, timeout=0.05)
-            t = threading.Thread(target=self._rx_loop, name="SerialRx", daemon=True)
+            serial_port = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                timeout=1.0,
+                write_timeout=1.0,
+            )
+
+            reader_thread = serial.threaded.ReaderThread(
+                serial_port,
+                lambda: SerialStream._Protocol(self),
+            )
+            reader_thread.start()
+
+            _transport, protocol = reader_thread.connect()
 
             with self._lock:
-                self._serial = s
-                self._rx_thread = t
-                self._stop_event.clear()
-                self._connected_flag = True
+                self._serial_port = serial_port
+                self._reader_thread = reader_thread
+                self._protocol = protocol
+                self._is_connected = True
 
-            t.start()
-            self._on_connected()
             return True
 
-        except Exception as e:
-            Logger.write(
-                LogLevel.WARNING,
-                f"Failed to open serial port ({port}, {baudrate}): {type(e).__name__}: {e}",
-            )
-            self.close()
-            return False
+        except Exception as exc:
+            try:
+                self.close()
+            except Exception:
+                pass
+
+            raise StreamIOError(
+                f"Failed to open serial port '{port}' at baudrate {baudrate}."
+            ) from exc
 
     def close(self) -> None:
-        """Close the serial port and stop the reader thread."""
+        """Close the stream and stop the reader thread."""
         with self._lock:
-            t = self._rx_thread
-            s = self._serial
-            was_connected = self._connected_flag
+            reader_thread = self._reader_thread
+            serial_port = self._serial_port
 
-            self._rx_thread = None
-            self._serial = None
-            self._connected_flag = False
-            self._stop_event.set()
+            self._reader_thread = None
+            self._protocol = None
+            self._serial_port = None
+            self._is_connected = False
 
-        if s and s.is_open:
+        close_error: Optional[Exception] = None
+
+        if reader_thread is not None:
             try:
-                s.close()
-            except Exception as e:
-                Logger.write(
-                    LogLevel.WARNING,
-                    f"Serial close failed: {type(e).__name__}: {e}",
-                )
+                reader_thread.close()
+            except Exception as exc:
+                close_error = exc
+        if serial_port is not None and serial_port.is_open:
+            try:
+                serial_port.close()
+            except Exception as exc:
+                close_error = exc
 
-        if t and t.is_alive():
-            t.join(timeout=0.5)
-
-        if was_connected:
-            self._on_disconnected()
+        if close_error is not None:
+            raise StreamIOError("Failed to close serial port.") from close_error
 
     def write(self, data: bytes) -> bool:
-        """Write raw bytes directly to the serial port.
-
-        Args:
-            data:
-                Raw bytes to transmit.
-
-        Returns:
-            True on success, otherwise False.
-        """
-        if not isinstance(data, (bytes, bytearray, memoryview)):
-            Logger.write(
-                LogLevel.WARNING,
-                "Serial write failed: data must be bytes-like",
-            )
+        """Write bytes to the stream."""
+        if data is None or not isinstance(data, (bytes, bytearray, memoryview)):
             return False
-
-        payload = bytes(data)
-        if not payload:
-            Logger.write(LogLevel.WARNING, "Serial write failed: empty payload")
-            return False
-
-        with self._lock:
-            s = self._serial
-            ok = self._connected_flag
-
-        if not (s and s.is_open and ok):
-            Logger.write(LogLevel.WARNING, "Serial write failed: not connected")
+        if self.is_connected() is False:
             return False
 
         try:
-            s.write(payload)
+            self._reader_thread.write(data)
             return True
-        except Exception as e:
-            Logger.write(
-                LogLevel.WARNING,
-                f"Serial write failed: {type(e).__name__}: {e}",
-            )
-            return False
+        except Exception as exc:
+            raise StreamIOError("Failed to write bytes to serial port.") from exc
 
-    def read(self, timeout: Optional[float] = None) -> Optional[bytes]:
-        """Read one raw byte chunk from the receive queue.
-
-        Args:
-            timeout:
-                Optional timeout in seconds.
-
-        Returns:
-            Raw received bytes, or None if no data is available.
-        """
-        try:
-            return self._read_queue.get(timeout=timeout)
-        except Empty:
+    def read(self, size: int, timeout: Optional[float] = None) -> Optional[bytes]:
+        """Read up to size bytes from RX queue within timeout."""
+        if size <= 0:
+            return None
+        if self.is_connected() is False:
             return None
 
-    def publish(self, name: str) -> None:
-        """Notify subscribed listeners.
+        result = bytearray()
 
-        Args:
-            name:
-                Event name.
-        """
-        with self._lock:
-            listeners = list(self._event_listeners)
+        buffered_size = min(size, len(self._reader_buffer))
+        result.extend(self._reader_buffer[:buffered_size])
+        del self._reader_buffer[:buffered_size]
 
-        for listener in listeners:
-            try:
-                listener(name)
-            except Exception as e:
-                Logger.write(
-                    LogLevel.WARNING,
-                    f"Event listener error: {type(e).__name__}: {e}",
-                )
+        deadline: Optional[float]
+        if timeout is None:
+            deadline = None
+        else:
+            deadline = time.monotonic() + timeout
 
-    def _on_connected(self) -> None:
-        """Handle the connected transition."""
-        self.publish("connected")
-        Logger.write(LogLevel.PROGRESS, "Serial port is connected.")
+        single_poll: bool = timeout is not None and timeout <= 0.0
 
-    def _on_disconnected(self) -> None:
-        """Handle the disconnected transition."""
-        self.publish("disconnected")
-        Logger.write(LogLevel.PROGRESS, "Serial port is disconnected.")
+        try:
+            while len(result) < size:
+                if deadline is None:
+                    wait_timeout = None
+                else:
+                    wait_timeout = max(deadline - time.monotonic(), 0.0)
 
-    def _rx_loop(self) -> None:
-        """Continuously read raw bytes from the serial port."""
-        while not self._stop_event.is_set():
-            with self._lock:
-                s = self._serial
+                if wait_timeout is not None and wait_timeout <= 0.0 and not single_poll:
+                    break
+                
+                single_poll = False
 
-            if s is None or not s.is_open:
-                break
+                chunk = self._reader_queue.get(timeout=wait_timeout)
 
-            try:
-                raw = s.read(256)
-            except Exception as e:
-                Logger.write(
-                    LogLevel.WARNING,
-                    f"Serial read failed: {type(e).__name__}: {e}",
-                )
-                break
+                more_size = size - len(result)
+                result.extend(chunk[:more_size])
 
-            if raw:
-                self._read_queue.put(raw)
+                if len(chunk) > more_size:
+                    self._reader_buffer.extend(chunk[more_size:])
 
-        with self._lock:
-            was_connected = self._connected_flag
-            self._connected_flag = False
+            return bytes(result) if result else None
 
-        if was_connected:
-            self._on_disconnected()
+        except Empty:
+            return bytes(result) if result else None
+
+        except Exception as exc:
+            raise StreamIOError("Failed to read from serial queue.") from exc

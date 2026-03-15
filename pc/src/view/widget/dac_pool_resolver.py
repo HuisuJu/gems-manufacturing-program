@@ -1,303 +1,227 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
+from tkinter import messagebox
 
 import customtkinter as ctk
 
-import storage
+from logger import Logger, LogLevel
+from storage import dac_pool_store
 
 
-class DacPoolResolverFrame(ctk.CTkFrame):
-    """Widget for selecting and loading a DAC pool folder."""
+ChangedCallback = Callable[[], None]
 
-    def __init__(self, master, **kwargs) -> None:
-        super().__init__(master, **kwargs)
 
-        self._current_path: Path | None = None
+_CARD_CORNER_RADIUS = 14
+_CARD_BORDER_WIDTH = 1
+_CARD_PADX = 20
+_CARD_PADY_TOP = 18
+_CARD_PADY_BOTTOM = 18
+
+_LABEL_WIDTH = 130
+_INPUT_HEIGHT = 35
+_BROWSE_BUTTON_WIDTH = 110
+_DESCRIPTION_WRAPLENGTH = 900
+
+
+class DacPoolResolverWidget(ctk.CTkFrame):
+    """Card-style widget for selecting and loading a DAC pool directory."""
+
+    _DEFAULT_STATUS_TEXT = "Choose a valid DAC pool (folder of DAC certificate and key pairs)."
+    _INVALID_STATUS_TEXT = "Not a valid DAC pool (folder required)."
+    _VALID_STATUS_TEXT = "DAC pool loaded."
+    _LOAD_ERROR_TEXT = (
+        "Failed to load the DAC pool. "
+        "Please select a valid folder containing DAC certificate and key pairs."
+    )
+
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        on_changed: ChangedCallback | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            parent,
+            corner_radius=_CARD_CORNER_RADIUS,
+            border_width=_CARD_BORDER_WIDTH,
+            **kwargs,
+        )
+
+        self._on_changed = on_changed
 
         self.grid_columnconfigure(1, weight=1)
 
         self._title_label = ctk.CTkLabel(
             self,
-            text="DAC Pool Folder",
-            anchor="w",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            text="DAC Pool",
+            anchor="nw",
+            width=_LABEL_WIDTH,
+            font=ctk.CTkFont(size=17, weight="bold"),
         )
         self._title_label.grid(
             row=0,
             column=0,
-            columnspan=3,
-            sticky="ew",
-            padx=12,
-            pady=(12, 6),
+            sticky="nw",
+            padx=(20, 12),
+            pady=(_CARD_PADY_TOP, 8),
         )
 
-        self._path_label = ctk.CTkLabel(
-            self,
-            text="Folder",
-            anchor="w",
-        )
-        self._path_label.grid(
-            row=1,
-            column=0,
-            sticky="w",
-            padx=(12, 6),
-            pady=6,
-        )
-
-        self._path_entry = ctk.CTkEntry(self)
-        self._path_entry.grid(
-            row=1,
+        self._input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._input_frame.grid(
+            row=0,
             column=1,
             sticky="ew",
-            padx=6,
-            pady=6,
+            padx=(0, _CARD_PADX),
+            pady=(_CARD_PADY_TOP, 8),
+        )
+        self._input_frame.grid_columnconfigure(0, weight=1)
+
+        self._path_entry = ctk.CTkEntry(
+            self._input_frame,
+            height=_INPUT_HEIGHT,
+            font=ctk.CTkFont(size=15),
+        )
+        self._path_entry.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=(0, 10),
         )
 
         self._browse_button = ctk.CTkButton(
-            self,
+            self._input_frame,
             text="Browse",
-            width=100,
+            width=_BROWSE_BUTTON_WIDTH,
+            height=_INPUT_HEIGHT,
+            corner_radius=10,
             command=self._on_browse,
         )
         self._browse_button.grid(
-            row=1,
-            column=2,
+            row=0,
+            column=1,
             sticky="e",
-            padx=(6, 12),
-            pady=6,
-        )
-
-        self._button_row = ctk.CTkFrame(self, fg_color="transparent")
-        self._button_row.grid(
-            row=2,
-            column=0,
-            columnspan=3,
-            sticky="ew",
-            padx=12,
-            pady=(0, 8),
-        )
-        self._button_row.grid_columnconfigure((0, 1, 2), weight=1)
-
-        self._load_button = ctk.CTkButton(
-            self._button_row,
-            text="Load",
-            command=self._on_load,
-        )
-        self._load_button.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 4),
-            pady=0,
-        )
-
-        self._refresh_button = ctk.CTkButton(
-            self._button_row,
-            text="Refresh",
-            command=self._on_refresh,
-        )
-        self._refresh_button.grid(
-            row=0,
-            column=1,
-            sticky="ew",
-            padx=4,
-            pady=0,
-        )
-
-        self._clear_button = ctk.CTkButton(
-            self._button_row,
-            text="Clear",
-            command=self._on_clear,
-        )
-        self._clear_button.grid(
-            row=0,
-            column=2,
-            sticky="ew",
-            padx=(4, 0),
-            pady=0,
-        )
-
-        self._summary_frame = ctk.CTkFrame(self)
-        self._summary_frame.grid(
-            row=3,
-            column=0,
-            columnspan=3,
-            sticky="ew",
-            padx=12,
-            pady=6,
-        )
-        self._summary_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
-
-        self._total_label = ctk.CTkLabel(
-            self._summary_frame,
-            text="Total: 0",
-            anchor="center",
-        )
-        self._total_label.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=8,
-            pady=10,
-        )
-
-        self._ready_label = ctk.CTkLabel(
-            self._summary_frame,
-            text="Ready: 0",
-            anchor="center",
-        )
-        self._ready_label.grid(
-            row=0,
-            column=1,
-            sticky="ew",
-            padx=8,
-            pady=10,
-        )
-
-        self._consumed_label = ctk.CTkLabel(
-            self._summary_frame,
-            text="Consumed: 0",
-            anchor="center",
-        )
-        self._consumed_label.grid(
-            row=0,
-            column=2,
-            sticky="ew",
-            padx=8,
-            pady=10,
-        )
-
-        self._error_label = ctk.CTkLabel(
-            self._summary_frame,
-            text="Error: 0",
-            anchor="center",
-        )
-        self._error_label.grid(
-            row=0,
-            column=3,
-            sticky="ew",
-            padx=8,
-            pady=10,
         )
 
         self._status_label = ctk.CTkLabel(
             self,
-            text="No DAC folder loaded.",
-            anchor="w",
-            justify="left",
-            wraplength=700,
+            text=self._DEFAULT_STATUS_TEXT,
+            anchor="e",
+            justify="right",
+            wraplength=_DESCRIPTION_WRAPLENGTH,
+            font=ctk.CTkFont(size=13),
         )
         self._status_label.grid(
-            row=4,
+            row=1,
             column=0,
-            columnspan=3,
+            columnspan=2,
             sticky="ew",
-            padx=12,
-            pady=(6, 12),
+            padx=_CARD_PADX,
+            pady=(0, _CARD_PADY_BOTTOM),
         )
+
+        self._sync_from_store()
 
     @property
-
     def current_path(self) -> Path | None:
-        """Return current DAC folder path."""
-        return self._current_path
+        """Return current DAC pool directory path."""
+        raw_path = dac_pool_store.pool_path
+        if not raw_path:
+            return None
+        return Path(raw_path)
+
+    @property
+    def is_ready(self) -> bool:
+        """Return whether a valid DAC pool is currently loaded."""
+        return dac_pool_store.pool_path is not None
 
     def load_path(self, path: Path | None) -> None:
-        """Load DAC folder path and refresh widget state."""
-        if path is None:
-            storage.dac_pool_store.load(None)
-            self._current_path = None
-            self._path_entry.delete(0, "end")
-            self._update_inventory_labels(
-                storage.DacInventoryReport(total=0, ready=0, consumed=0, error=0)
-            )
-            self._set_status("No DAC folder loaded.")
-            return
+        """Load DAC pool directory and update widget state."""
+        normalized_path = None
+        if path is not None:
+            normalized_path = str(path.expanduser().resolve())
 
-        storage.dac_pool_store.load(path)
-        self._current_path = path.resolve()
-
-        self._path_entry.delete(0, "end")
-        self._path_entry.insert(0, str(self._current_path))
-
-        report = storage.dac_pool_store.get_inventory_report()
-        self._update_inventory_labels(report)
-        self._set_status(f"DAC folder loaded successfully: {self._current_path}")
+        dac_pool_store.load(normalized_path)
+        self._sync_from_store()
+        self._publish_changed()
 
     def _on_browse(self) -> None:
-        """Open folder picker and fill the path entry."""
-        selected = filedialog.askdirectory(
+        """Open folder chooser and attempt to load selected DAC pool."""
+        initial_dir = self._path_entry.get().strip() or None
+
+        selected_dir = filedialog.askdirectory(
             title="Select DAC Pool Folder",
-            mustexist=True,
+            initialdir=initial_dir,
         )
-        if not selected:
+        if not selected_dir:
             return
+
+        selected_path = Path(selected_dir).expanduser().resolve()
 
         self._path_entry.delete(0, "end")
-        self._path_entry.insert(0, selected)
+        self._path_entry.insert(0, str(selected_path))
 
-    def _on_load(self) -> None:
-        """Load folder from the path entry."""
-        raw_path = self._path_entry.get().strip()
-        if not raw_path:
-            self._show_error("Please select a DAC folder first.")
+        try:
+            self.load_path(selected_path)
+        except Exception as exc:
+            Logger.write(LogLevel.ALERT, str(exc))
+            self._set_invalid_status(self._INVALID_STATUS_TEXT)
+            self._show_error(self._LOAD_ERROR_TEXT)
+
+    def _sync_from_store(self) -> None:
+        """Sync entry text and status label from store state."""
+        current_path = dac_pool_store.pool_path
+
+        self._path_entry.delete(0, "end")
+
+        if not current_path:
+            self._set_default_status()
             return
 
-        try:
-            self.load_path(Path(raw_path))
-        except (
-            storage.AttestationStoreConfigurationError,
-            storage.AttestationStoreError,
-        ) as exc:
-            self._update_inventory_labels(
-                storage.DacInventoryReport(total=0, ready=0, consumed=0, error=0)
-            )
-            self._set_status(str(exc))
-            self._show_error(str(exc))
+        self._path_entry.insert(0, current_path)
 
-    def _on_refresh(self) -> None:
-        """Reload current DAC folder."""
-        if self._current_path is None:
-            self._show_error("There is no DAC folder to refresh.")
+        try:
+            report = dac_pool_store.get_inventory_report()
+        except Exception:
+            self._set_invalid_status(self._INVALID_STATUS_TEXT)
             return
 
-        try:
-            self.load_path(self._current_path)
-        except (
-            storage.AttestationStoreConfigurationError,
-            storage.AttestationStoreError,
-        ) as exc:
-            self._update_inventory_labels(
-                storage.DacInventoryReport(total=0, ready=0, consumed=0, error=0)
-            )
-            self._set_status(str(exc))
-            self._show_error(str(exc))
+        self._set_valid_status(
+            f"Total={report.total} / "
+            f"Ready={report.ready} / "
+            f"Progress={report.progress} / "
+            f"Consumed={report.consumed} / "
+            f"Error={report.error}"
+        )
 
-    def _on_clear(self) -> None:
-        """Clear DAC folder selection and reset UI state."""
-        try:
-            self.load_path(None)
-        except (
-            storage.AttestationStoreConfigurationError,
-            storage.AttestationStoreError,
-        ) as exc:
-            self._set_status(str(exc))
-            self._show_error(str(exc))
+    def _set_default_status(self) -> None:
+        """Show neutral status."""
+        self._status_label.configure(
+            text=self._DEFAULT_STATUS_TEXT,
+            text_color=("gray45", "gray65"),
+        )
 
-    def _update_inventory_labels(self, report: storage.DacInventoryReport) -> None:
-        """Update inventory summary labels."""
-        self._total_label.configure(text=f"Total: {report.total}")
-        self._ready_label.configure(text=f"Ready: {report.ready}")
-        self._consumed_label.configure(text=f"Consumed: {report.consumed}")
-        self._error_label.configure(text=f"Error: {report.error}")
+    def _set_valid_status(self, message: str) -> None:
+        """Show valid DAC pool summary."""
+        self._status_label.configure(
+            text=message,
+            text_color="green",
+        )
 
-    def _set_status(self, message: str) -> None:
-        """Set status message."""
-        self._status_label.configure(text=message)
+    def _set_invalid_status(self, message: str) -> None:
+        """Show invalid DAC pool status."""
+        self._status_label.configure(
+            text=message,
+            text_color="red",
+        )
 
     def _show_error(self, message: str) -> None:
-        """Show error popup."""
+        """Show an error popup."""
         messagebox.showerror("DAC Pool Error", message)
+
+    def _publish_changed(self) -> None:
+        """Notify parent that widget state changed."""
+        if self._on_changed is not None:
+            self._on_changed()

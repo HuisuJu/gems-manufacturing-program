@@ -4,24 +4,24 @@ from .provider import (
     FactoryDataProviderInProgressError,
     FactoryDataProviderReportError,
 )
-from .retrievers import (
-    DeviceIdentityRetriever,
-    ManufacturingDataRetriever,
-    MatterAttestationDataRetriever,
-    MatterOnboardingDataRetriever,
-    Retriever,
-    RetrieverError,
+from .retriever import Retriever, RetrieverError
+from .schema import (
+    FactoryDataSchema,
+    FactoryDataSchemaError,
+    FactoryDataSchemaFieldError,
+    FactoryDataSchemaFileError,
 )
 
+
 __all__ = [
-    'FactoryDataProvider',
-    'FactoryDataProviderError',
-    'FactoryDataProviderInProgressError',
-    'FactoryDataProviderReportError',
-    'Retriever',
-    'RetrieverError',
-    'DeviceIdentityRetriever',
-    'ManufacturingDataRetriever',
-    'MatterAttestationDataRetriever',
-    'MatterOnboardingDataRetriever',
+    "FactoryDataProvider",
+    "FactoryDataProviderError",
+    "FactoryDataProviderInProgressError",
+    "FactoryDataProviderReportError",
+    "Retriever",
+    "RetrieverError",
+    "FactoryDataSchema",
+    "FactoryDataSchemaError",
+    "FactoryDataSchemaFieldError",
+    "FactoryDataSchemaFileError",
 ]

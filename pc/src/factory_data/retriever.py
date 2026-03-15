@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-
 from typing import AbstractSet, Any
 
 from .schema import FactoryDataSchema
@@ -16,14 +15,12 @@ class Retriever(ABC):
 
     @property
     @abstractmethod
-
     def name(self) -> str:
         """Return retriever name."""
         raise NotImplementedError
 
     @property
     @abstractmethod
-
     def supported_fields(self) -> AbstractSet[str]:
         """Return fields this retriever can provide."""
         raise NotImplementedError
@@ -33,13 +30,11 @@ class Retriever(ABC):
         return set(schema.required_fields) & set(self.supported_fields)
 
     @abstractmethod
-
     def fetch(self, schema: FactoryDataSchema) -> dict[str, Any]:
         """Fetch factory data for requested schema fields."""
-        return {}
+        raise NotImplementedError
 
     @abstractmethod
-
     def report(self, is_success: bool) -> None:
         """Report the result of the fetch operation."""
-        pass
+        raise NotImplementedError

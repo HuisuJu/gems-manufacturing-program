@@ -1,135 +1,128 @@
 from __future__ import annotations
 
-from enum import IntEnum
+from dataclasses import dataclass
+
+from frame.protocol import decode_u32_be, encode_u32_be
+
+from .protocol import (
+    PROTOCOL_VERSION,
+    SESSION_HEADER_SIZE,
+    SESSION_ID_SIZE,
+    SESSIONLESS_HEADER_SIZE,
+    PacketType,
+    SessionArgumentError,
+    SessionProtocolError,
+    header_size_for,
+    is_sessionless_packet,
+)
 
 
-class PacketType(IntEnum):
-    MESSAGE = 0x01
+@dataclass(slots=True)
+class SessionPacket:
+    """Concrete session-layer packet."""
 
-    PC_HELLO = 0x10
-    PC_BYE = 0x11
-    PC_ALERT = 0x12
+    type: PacketType
+    payload: bytes
+    flag: int = 0
+    session_id: bytes | None = None
 
-    DEV_HELLO = 0x20
-    DEV_BYE = 0x21
-    DEV_ALERT = 0x22
-    DEV_CHALLENGE = 0x23
+    def __post_init__(self) -> None:
+        self.payload = bytes(self.payload)
+        self.flag &= 0xFF
 
-    UNKNOWN = 0xFF
-
-
-PROTOCOL_VERSION = 0x01
-SESSION_ID_SIZE = 16
-
-
-_SESSIONLESS_TYPES = {
-    PacketType.PC_HELLO,
-    PacketType.PC_ALERT,
-    PacketType.DEV_HELLO,
-    PacketType.DEV_ALERT,
-    PacketType.DEV_CHALLENGE,
-}
-
-
-def _is_sessionless(type: PacketType) -> bool:
-    return type in _SESSIONLESS_TYPES
-
-
-def _u32_to_bytes(x: int) -> bytes:
-    return (x & 0xFFFFFFFF).to_bytes(4, "big")
-
-
-def _bytes_to_u32(b: bytes) -> int:
-    return int.from_bytes(b, "big")
-
-
-class PacketBuilder:
-    def __init__(
-        self,
-        type: PacketType = PacketType.UNKNOWN,
-        payload: bytes = b"",
-        session_id: bytes = b"",
-        flag: int = 0,
-    ):
-        self.type: PacketType = type
-        self.session_id: bytes = bytes(session_id)
-        self.flag: int = int(flag) & 0xFF
-        self.payload: bytes = payload
-
-    def build(self) -> bytes:
-        if not isinstance(self.payload, (bytes, bytearray, memoryview)):
-            raise TypeError("payload must be bytes-like")
-
-        payload = bytes(self.payload)
-        if len(payload) > 0xFFFFFFFF:
-            raise ValueError("payload too large")
-
-        if _is_sessionless(self.type):
-            return (
-                bytes([PROTOCOL_VERSION, int(self.type) & 0xFF, self.flag])
-                + _u32_to_bytes(len(payload))
-                + payload
-            )
+        if is_sessionless_packet(self.type):
+            if self.session_id not in (None, b""):
+                raise SessionArgumentError("sessionless packet must not carry a session_id.")
+            self.session_id = None
         else:
-            if len(self.session_id) != SESSION_ID_SIZE:
-                raise ValueError("session_id must be 16 bytes for session packets")
+            if self.session_id is None:
+                raise SessionArgumentError("session packet requires a 16-byte session_id.")
 
-            return (
-                bytes([PROTOCOL_VERSION, int(self.type) & 0xFF, self.flag])
-                + self.session_id
-                + _u32_to_bytes(len(payload))
-                + payload
+            self.session_id = bytes(self.session_id)
+            if len(self.session_id) != SESSION_ID_SIZE:
+                raise SessionArgumentError("session packet session_id must be exactly 16 bytes.")
+
+    @property
+    def version(self) -> int:
+        """Return the protocol version."""
+        return PROTOCOL_VERSION
+
+    @property
+    def is_sessionless(self) -> bool:
+        """Return whether this packet uses the sessionless header."""
+        return is_sessionless_packet(self.type)
+
+    @property
+    def header_size(self) -> int:
+        """Return the encoded header size for this packet."""
+        return header_size_for(self.type)
+
+    @property
+    def encoded_size(self) -> int:
+        """Return the total encoded packet size."""
+        return self.header_size + len(self.payload)
+
+    def encode(self) -> bytes:
+        """Encode the packet into wire-format bytes."""
+        prefix = bytes((self.version, int(self.type), self.flag))
+
+        if self.is_sessionless:
+            return prefix + encode_u32_be(len(self.payload)) + self.payload
+
+        assert self.session_id is not None
+        return prefix + self.session_id + encode_u32_be(len(self.payload)) + self.payload
+
+    @classmethod
+    def decode(cls, raw: bytes) -> "SessionPacket":
+        """Decode a complete wire-format session packet."""
+        raw = bytes(raw)
+
+        if len(raw) < SESSIONLESS_HEADER_SIZE:
+            raise SessionProtocolError("session packet is shorter than the minimum header size.")
+
+        version = raw[0]
+        if version != PROTOCOL_VERSION:
+            raise SessionProtocolError("session packet version mismatch.")
+
+        try:
+            packet_type = PacketType(raw[1])
+        except ValueError as exc:
+            raise SessionProtocolError(f"unsupported session packet type: {raw[1]!r}") from exc
+
+        flag = raw[2]
+        sessionless = is_sessionless_packet(packet_type)
+
+        if sessionless:
+            if len(raw) < SESSIONLESS_HEADER_SIZE:
+                raise SessionProtocolError("sessionless packet is shorter than its header.")
+            payload_size = decode_u32_be(raw[3:7])
+            expected_size = SESSIONLESS_HEADER_SIZE + payload_size
+
+            if len(raw) != expected_size:
+                raise SessionProtocolError("sessionless packet size mismatch.")
+
+            payload = raw[SESSIONLESS_HEADER_SIZE:]
+            return cls(
+                type=packet_type,
+                flag=flag,
+                payload=payload,
+                session_id=None,
             )
 
+        if len(raw) < SESSION_HEADER_SIZE:
+            raise SessionProtocolError("session packet is shorter than its header.")
 
-class PacketParser:
-    def __init__(self):
-        self.type: PacketType = PacketType.UNKNOWN
-        self.session_id: bytes = b""
-        self.flag: int = 0
-        self.payload: bytes = b""
+        session_id = raw[3 : 3 + SESSION_ID_SIZE]
+        payload_size = decode_u32_be(raw[3 + SESSION_ID_SIZE : 3 + SESSION_ID_SIZE + 4])
+        expected_size = SESSION_HEADER_SIZE + payload_size
 
-    def parse(self, packet: bytes) -> None:
-        if not isinstance(packet, (bytes, bytearray, memoryview)):
-            raise TypeError("packet must be bytes-like")
+        if len(raw) != expected_size:
+            raise SessionProtocolError("session packet size mismatch.")
 
-        packet = bytes(packet)
-
-        if len(packet) < 3 + 4:
-            raise ValueError("packet too short")
-
-        if packet[0] != PROTOCOL_VERSION:
-            raise ValueError("bad protocol version")
-
-        raw_type = packet[1]
-        try:
-            type = PacketType(raw_type)
-        except ValueError:
-            type = PacketType.UNKNOWN
-        flag = packet[2]
-
-        if _is_sessionless(type):
-            size = _bytes_to_u32(packet[3:7])
-            expected = 3 + 4 + size
-            if len(packet) != expected:
-                raise ValueError("size mismatch")
-
-            self.type = type
-            self.flag = flag
-            self.session_id = b""
-            self.payload = packet[7:]
-            return
-
-        if len(packet) < 3 + SESSION_ID_SIZE + 4:
-            raise ValueError("session header too short")
-
-        session_id = packet[3:3 + SESSION_ID_SIZE]
-        size = _bytes_to_u32(packet[3 + SESSION_ID_SIZE:3 + SESSION_ID_SIZE + 4])
-        expected = 3 + SESSION_ID_SIZE + 4 + size
-        if len(packet) != expected:
-            raise ValueError("size mismatch")
-
-        self.type = type
-        self.flag = flag
-        self.session_id = session_id
-        self.payload = packet[3 + SESSION_ID_SIZE + 4:]
+        payload = raw[SESSION_HEADER_SIZE:]
+        return cls(
+            type=packet_type,
+            flag=flag,
+            payload=payload,
+            session_id=session_id,
+        )

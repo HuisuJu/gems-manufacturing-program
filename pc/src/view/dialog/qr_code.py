@@ -18,8 +18,6 @@ from logger import Logger, LogLevel
 
 
 @dataclass(frozen=True, slots=True)
-
-
 class QrCodeData:
     """One QR code result."""
 
