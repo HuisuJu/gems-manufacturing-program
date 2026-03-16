@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sys
+
 from pathlib import Path
 
 from logger import Logger, LogLevel
+
 from system import MODEL_NAME_KEY, ModelName, Settings
 
 _active_model: ModelName | None = None
@@ -59,7 +61,8 @@ def _teardown_active_model() -> None:
 
     match _active_model:
         case ModelName.DOORLOCK:
-            pass
+            from models import doorlock
+            doorlock.teardown()
         case ModelName.THERMOSTAT:
             from models import thermostat
             thermostat.teardown()
@@ -79,11 +82,8 @@ def _setup_runtime_for_model(model: ModelName) -> None:
 
     match model:
         case ModelName.DOORLOCK:
-            Logger.write(
-                LogLevel.WARNING,
-                "Doorlock model is not available yet.",
-            )
-            return
+            from models import doorlock
+            doorlock.setup(schema_dir, model)
 
         case ModelName.THERMOSTAT:
             from models import thermostat
